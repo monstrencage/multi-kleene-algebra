@@ -1,3 +1,9 @@
+*~
+CoqMakefile
+CoqMakefile.conf
+
+## GitHub generated list of ignored patterns, from the prompt 'Coq'
+
 .*.aux
 .*.d
 *.a
