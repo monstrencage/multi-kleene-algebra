@@ -606,6 +606,7 @@ Global Instance Empty_implies_any_term_theory {X O : Set} (r : relation (GTerm X
   subrelation Ø (gnl_term_theo_eq r).
 Proof. exact (Empty_implies_anything (gnl_term_theo_eq r)). Qed.
 
+(** * A theorem about satisfaction *)
 (** Every satisfaction relation can be factored into the corresponding equivalence *)
 (** on terms composed with the satisfaction relation associated with the empty theory. *)
 
@@ -644,6 +645,193 @@ Proof.
     revert h;apply gnl_theo_sat_subrelation.
     intros ? ? [].
 Qed.
+
+Section clean.
+(** * Removing deep zeros from expressions *)
+
+  (** We fix a decidable set of variables and a decidable set of operators. *)
+  
+  Context {X O : Set} {decX: decidable_set X} {decO: decidable_set O}.
+
+  (** A [deep_clean] expression is one that does not contain the constant [ø]. *)
+    
+  Fixpoint is_deep_clean (e : GExp X O) : bool :=
+    match e with
+    | ø => false
+    | var _ => true
+    | e + f | e ×{_} f => (is_deep_clean e && is_deep_clean f)%bool
+    | e ^{_} => is_deep_clean e
+    end.
+
+  (** A [clean] expression is either the constant [ø] itself, or a [deep_clean] expression. *)
+
+  Definition is_clean e :=
+    match e with
+    | ø => true
+    | e => is_deep_clean e
+    end.
+
+  (** The [clean_exp] function tries to produce an equivalent [deep_clean] expression from *)
+  (** an arbitrary expression [e], and returns [None] if it is not possible. *)
+  
+  Fixpoint clean_exp (e : GExp X O) : option (GExp X O) :=
+    match e with
+    | ø => None
+    | var a => Some (var a)
+    | e + f =>
+        match (clean_exp e),(clean_exp f) with
+        | None,None => None
+        | Some g,None | None,Some g => Some g
+        | Some g1,Some g2 => Some (g1+g2)
+        end
+    | e ×{o} f => 
+        match (clean_exp e),(clean_exp f) with
+        | None,None | Some _,None | None,Some _ => None
+        | Some g1,Some g2 => Some (g1 ×{o} g2)
+        end
+    |e ^{o} =>
+       match (clean_exp e) with
+       | None => None
+       | Some g => Some (g^{o})
+       end
+    end.
+
+  (** The [Clean] function calls the previous one, and changes the value [None] back to [ø]. *)
+  
+  Definition Clean e :=
+    match (clean_exp e) with
+    | None => ø
+    | Some e => e
+    end.
+
+  (** We check that [Clean e] is provably equivalent to [e]. *)
+  
+  Lemma Clean_is_eq e : Ø |- Clean e == e.
+  Proof.
+    unfold Clean;induction e;simpl;(try now split;auto with proofs).
+    - destruct (clean_exp e1),(clean_exp e2);rewrite <- IHe1,<- IHe2;split;auto with proofs.
+    - destruct (clean_exp e1),(clean_exp e2);rewrite <- IHe1,<- IHe2;split;auto with proofs.
+    - destruct (clean_exp e);rewrite <- IHe;split;auto with proofs.
+  Qed.
+
+  (** We also verify that the output of [Clean] is indeed a [clean] expression. *)
+
+  Lemma clean_exp_is_deep_clean e g : clean_exp e = Some g -> is_deep_clean g = true.
+  Proof.
+    revert g;induction e;simpl;try discriminate.
+    - intros g E;inversion E;subst;reflexivity.
+    - destruct (clean_exp e1),(clean_exp e2);intros ? E;inversion E;subst;clear E;auto.
+      simpl;rewrite IHe1,IHe2 by reflexivity; reflexivity.
+    - destruct (clean_exp e1),(clean_exp e2);intros ? E;inversion E;subst;clear E;auto.
+      simpl;rewrite IHe1,IHe2 by reflexivity; reflexivity.
+    - destruct (clean_exp e);intros ? E;inversion E;subst;clear E;auto.
+      simpl;rewrite IHe by reflexivity; reflexivity.
+  Qed.
+
+  Lemma Clean_is_clean e : is_clean (Clean e) = true.
+  Proof.
+    unfold Clean;case_eq (clean_exp e);[|reflexivity].
+    intros g E;cut (is_deep_clean g = true);[destruct g;tauto|].
+    eapply clean_exp_is_deep_clean;eauto.
+  Qed.
+  
+  (** [Clean] is idempotent, since it acts as the identity on [clean] expressions. *)
+
+  Lemma Clean_is_id_on_clean e : is_clean e = true -> Clean e = e.
+  Proof.
+    intro C;assert (e = ø \/ is_deep_clean e = true) as D;
+      [destruct e;simpl;auto|clear C;destruct D as [->|D];[reflexivity|]].
+    unfold Clean.
+    cut (clean_exp e = Some e);[intros ->;reflexivity|].
+    induction e;simpl in *.
+    - discriminate.
+    - reflexivity.
+    - apply Bool.andb_true_iff in D as (D1&D2).
+      rewrite IHe1,IHe2 by assumption.
+      reflexivity.
+    - apply Bool.andb_true_iff in D as (D1&D2).
+      rewrite IHe1,IHe2 by assumption.
+      reflexivity.
+    - rewrite IHe by assumption.
+      reflexivity.
+  Qed.
+
+  Corollary Clean_Clean e : Clean (Clean e) = Clean e.
+  Proof. apply Clean_is_id_on_clean,Clean_is_clean. Qed.
+
+  (** [deep_clean] expressions have non-empty interpretations. *)
+  
+  Lemma deep_clean_sat e : is_deep_clean e = true -> { t & t |=(Ø)= e }.
+  Proof.
+    induction e;simpl.
+    - discriminate.
+    - intros _;exists (t_var x);reflexivity.
+    - intros h;apply Bool.andb_true_iff in h as (h1&h2).
+      destruct (IHe1 h1) as (t1&ht1).
+      exists t1;tauto.
+    - intros h;apply Bool.andb_true_iff in h as (h1&h2).
+      destruct (IHe1 h1) as (t1&ht1).
+      destruct (IHe2 h2) as (t2&ht2).
+      exists (t1 -[o]- t2),t1,t2;repeat split;auto with proofs.
+    - intros h.
+      destruct (IHe h) as (t&ht).
+      exists t,t,[t];repeat split;auto with proofs.
+      intros ? [<-|F];[|exfalso];auto.
+  Qed.
+
+  (** A useful lemma for case analysis: *)
+  
+  Lemma clean_cases e :
+    (clean_exp e = None /\ Clean e = ø)
+    \/(exists g, clean_exp e = Some g /\ Clean e = g /\ is_deep_clean g = true).
+  Proof.
+    unfold Clean.
+    case_eq (clean_exp e).
+    - intros g Eg;right;exists g;repeat split;auto.
+      eapply clean_exp_is_deep_clean;eauto.
+    - tauto.
+  Qed.
+  
+End clean.
+
+(** * Helper functions *)
+
+(** [get_var] extracts variable from terms, and returns [None] for products. *)
+
+Definition get_var {X O} (e : GTerm X O) :=
+  match e with
+  | t_var a => Some a
+  | _ => None
+  end.
+
+(** The empty theory is consistent with this function. *)
+
+Lemma get_var_eq {X O} (e f : GTerm X O) :
+  Ø |- e =T= f -> get_var e = get_var f.
+Proof.
+  intro pr;induction pr;simpl;auto.
+  - etransitivity;eauto.
+  - inversion H.
+Qed.
+
+(** [get_op] does the opposite : it extracts the top operator from a term. *)
+
+Definition get_op {X O} (e : GTerm X O) :=
+  match e with
+  | t_var a => None
+  | _ -[o]- _ => Some o
+  end.
+
+(** It is also consistent with the empty theory. *)
+  
+Lemma get_op_eq {X O} (e f : GTerm X O) :
+  Ø |- e =T= f -> get_op e = get_op f.
+Proof.
+  intro pr;induction pr;simpl;auto.
+  - etransitivity;eauto.
+  - inversion H.
+Qed.
+
 
 Section gnl_functor.
   (** * Functorial expressions *)
@@ -780,3 +968,136 @@ Section gnl_functor.
   Proof. intros s t (h1&h2);split;[rewrite h1|rewrite h2];reflexivity. Qed.
   
 End gnl_functor.
+
+Section support.
+  (** * Support of an expression *)
+  
+  (** We fix a decidable set of variables and a decidable set of operators. *)
+  
+  Context {X O : Set} {decX: decidable_set X} {decO: decidable_set O}.
+
+  (** We define the support of an expression and that of a term in the obvious way, *)
+  (** as the list of variables that feature in them. *)
+  
+  Fixpoint gnl_support (e : GExp X O) : list X :=
+    match e with
+    | ø => []
+    | var a => [a]
+    | e + f | e ×{_} f => gnl_support e ++ gnl_support f
+    | e^{_} => gnl_support e
+    end.
+  
+  Fixpoint gnl_term_support (e : GTerm X O) : list X :=
+    match e with
+    | t_var a => [a]
+    | e -[_]- f => gnl_term_support e ++ gnl_term_support f
+    end.
+
+  (** If a theory on terms is composed of pairs of expressions that have the *)
+  (** same support (up-to commutativity and idempotence), then the associated *)
+  (** equivalence relation on terms has the same property. *)
+    
+  Lemma gnl_term_support_proper r :
+    Proper (r ==> eq_list) gnl_term_support ->
+    Proper (gnl_term_theo_eq r ==> eq_list) gnl_term_support.
+  Proof.
+    intros hyp e f pr;induction pr;simpl in *.
+    - reflexivity.
+    - symmetry; assumption.
+    - etransitivity;eassumption.
+    - rewrite IHpr1,IHpr2;reflexivity.
+    - rewrite app_assoc;reflexivity.
+    - apply hyp,H.
+  Qed.
+
+  (** This is the case in particular for the empty theory. *)
+
+  Global Instance gnl_term_support_Empty :
+    Proper (gnl_term_theo_eq Ø ==> eq_list) gnl_term_support.
+  Proof. apply gnl_term_support_proper;intros ? ? []. Qed.
+
+  (** It a term [t] satisfies an expressiom [e], then the support of [t] is *)
+  (** included in that of [e]. *)
+  
+  Lemma sat_support t e : t |=(Ø)= e -> incl (gnl_term_support t) (gnl_support e).
+  Proof.
+    intros h a;revert t h;induction e;simpl;auto;intro t.
+    - intros E;apply get_var_eq in E;destruct t;inversion E;subst;simpl;tauto.
+    - rewrite in_app_iff;now firstorder.
+    - rewrite in_app_iff.
+      intros (s1&s2&E&h1&h2).
+      apply gnl_term_support_Empty in E;rewrite (E a);simpl;rewrite in_app_iff.
+      intros [h|h];[left;eapply IHe1|right;eapply IHe2];eauto.
+    - intros (s&L&hs&E&hL).
+      apply gnl_term_support_Empty in E;rewrite (E a);simpl.
+      clear t E.
+      revert s hs hL;induction L;[discriminate|].
+      destruct (L =?= []);[clear IHL;subst|apply (GProd_Some _ o) in n as (s&hs);simpl;rewrite hs];
+        intros ? E;inversion E;subst;clear E.
+      + intros hL;apply IHe,hL;now left.
+      + simpl;rewrite in_app_iff.
+        intros hL [h|h];[eapply IHe,h;apply hL;now left|].
+        eapply IHL;eauto.
+  Qed.
+
+  (** For clean expressions, we can show that the support of [e] is the union of the supports *)
+  (** of the terms that satisfy [e]. *)
+      
+  Lemma clean_support_sat_iff e a :
+    is_clean e = true ->
+    (exists t, t |=(Ø)= e /\ In a (gnl_term_support t)) <-> In a (gnl_support e).
+  Proof.
+    intro C;split;[intros (t&h1&h2);eapply sat_support;eauto|].
+    assert (e = ø \/ is_deep_clean e = true) as D;
+      [destruct e;simpl;auto|clear C;destruct D as [->|D];[simpl;tauto|]].
+    induction e;simpl.
+    - tauto.
+    - intros [->|F];[|tauto].
+      eexists;split;[reflexivity|now left].
+    - rewrite in_app_iff.
+      simpl in D;apply Bool.andb_true_iff in D as (D1&D2). 
+      intros [h|h];[apply IHe1 in h|apply IHe2 in h];try assumption;
+        destruct h as (t&h1&h2);exists t;tauto.
+    - rewrite in_app_iff.
+      simpl in D;apply Bool.andb_true_iff in D as (D1&D2). 
+      intros [h|h];[apply IHe1 in h|apply IHe2 in h];try assumption;
+        destruct h as (t&h1&h2).
+      + destruct (deep_clean_sat _ D2) as (t2&ht2).
+        exists (t-[o]-t2);split.
+        * exists t,t2;repeat split;auto with proofs.
+        * simpl;rewrite in_app_iff;tauto.
+      + destruct (deep_clean_sat _ D1) as (t1&ht1).
+        exists (t1-[o]-t);split.
+        * exists t1,t;repeat split;auto with proofs.
+        * simpl;rewrite in_app_iff;tauto.
+    - intros h;simpl in D.
+      destruct (IHe D h) as (t&h1&h2).
+      exists t;split;auto.
+      exists t,[t];repeat split;auto with proofs.
+      intros ? [<-|F];[|exfalso];auto.
+  Qed.
+
+  (** The support of [Clean e] is included in that of [e]. *)
+  
+  Lemma clean_incl_support e : 
+    incl (gnl_support (Clean e)) (gnl_support e).
+  Proof.
+    unfold Clean.
+    case_eq (clean_exp e);[|simpl;intros _ ? F;exfalso;auto].
+    induction e;simpl in *.
+    - discriminate.
+    - intros ? E;inversion E;subst;intros ?;tauto.
+    - destruct (clean_exp e1) as [g1|],(clean_exp e2) as [g2|];
+        intros ? E;symmetry in E;inversion E;subst;clear E;simpl;
+        intros ?;repeat rewrite in_app_iff;intros [h|h]||intro h;
+        try apply (IHe1 g1) in h||apply (IHe2 g2) in h;tauto.
+    - destruct (clean_exp e1) as [g1|],(clean_exp e2) as [g2|];
+        intros ? E;symmetry in E;inversion E;subst;clear E;simpl;
+        intros ?;repeat rewrite in_app_iff;intros [h|h]||intro h;
+        try apply (IHe1 g1) in h||apply (IHe2 g2) in h;tauto.
+    - destruct (clean_exp e);simpl;[|discriminate].
+      intros ? E;inversion E;subst;clear E.
+      simpl;apply IHe;reflexivity.
+  Qed.
+
+End support.

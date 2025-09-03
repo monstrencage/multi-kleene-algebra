@@ -1,5 +1,5 @@
 Require Import prelim.
-Require Import gnl theories clean.
+Require Import gnl theories.
 
 Section gnl_decomp.
   Context {A : Set} {decA : decidable_set A}.
@@ -1519,46 +1519,55 @@ Section gnl_decomp.
     setoid_rewrite gnl_clean_decomp_sat_id.
     apply gnl_semantic_correspondance.
   Qed.
+
+  Definition sub_expr : relation (GExp A O) :=
+    fun e f => exists o, In (Some e) (gnl_support (Clean (gnl_reg_proj o (Clean f)))).
+
+  Lemma sub_expr_implies_is_clean e f : sub_expr e f -> is_clean e = true.
+  Proof.
+    unfold sub_expr;intros (o&h).
+    apply clean_incl_support in h.
+    cut (forall e f, In (Some e) (gnl_support (gnl_reg_trad o (Clean f))) -> is_clean e = true).
+    - intros htrad;induction f;simpl in h.
+      + tauto.
+      + tauto.
+      + clear htrad;unfold Clean in *;simpl in *.
+        destruct (clean_exp f1),(clean_exp f2);simpl in *;
+          try rewrite in_app_iff in *;tauto.
+      + unfold Clean in *;simpl in *.
+        pose proof (htrad e f1) as hf1.
+        pose proof (htrad e f2) as hf2;clear htrad.
+        destruct (clean_exp f1),(clean_exp f2);simpl in *;try tauto.
+        destruct (o0 =?= o);simpl in *;[|tauto].
+        apply in_app_iff in h as [h|h];[apply hf1|apply hf2];apply h.
+      + unfold Clean in *;simpl in *.
+        pose proof (htrad e f) as hf;clear htrad.
+        destruct (clean_exp f);simpl in *;try tauto.
+        destruct (o0 =?= o);simpl in *;[|tauto].
+        repeat apply in_app_iff in h as [h|h];tauto.
+    - clear h e f;intros e f;induction f;simpl.
+      + tauto.
+      + intros [E|F];[inversion E;subst;simpl|];tauto.
+      + unfold Clean in *;simpl in *.
+        destruct (clean_exp f1),(clean_exp f2);simpl in *;
+          try rewrite in_app_iff in *;tauto.
+      + unfold Clean;simpl.
+        destruct (clean_cases f1) as [(->&h1)|(g1&->&h1&D1)],
+            (clean_cases f2) as [(->&h2)|(g2&->&h2&D2)];simpl;try tauto.
+        destruct (o0 =?= o);simpl in *.
+        * intros h;apply in_app_iff in h as [h|h];[apply IHf1;rewrite h1|apply IHf2;rewrite h2];
+            assumption.
+        * intros [E|F];[inversion E;subst;simpl|tauto].
+          rewrite D1,D2;reflexivity.
+      + unfold Clean;simpl in *.
+        destruct (clean_cases f) as [(->&h)|(g&->&h&D)];simpl;try tauto.
+        destruct (o0 =?= o);simpl in *.
+        * subst;auto. 
+        * rewrite in_app_iff;intros [h'|[h'|h']];subst;auto.
+          inversion h';subst;clear h';simpl.
+          rewrite D;reflexivity.
+  Qed.
   
-  (* Lemma KA_sat_length_trad  (o : O) (m : list gnl_exp) e : *)
-  (*   KA_sat m (gnl_reg_trad o e) -> 0 < length m. *)
-  (* Proof. *)
-  (*   revert m;induction e;intros m;simpl. *)
-  (*   - tauto. *)
-  (*   - intros ->;simpl;lia. *)
-  (*   - firstorder. *)
-  (*   - destruct (o0 =?= o);simpl. *)
-  (*     + intros (l1&l2&->&h1&h2). *)
-  (*       rewrite length_app. *)
-  (*       apply IHe1 in h1;apply IHe2 in h2. *)
-  (*       lia. *)
-  (*     + intros ->;simpl;lia. *)
-  (*   - destruct (o0 =?= o);simpl. *)
-  (*     + intros (l1&l2&->&h1&h2). *)
-  (*       rewrite length_app. *)
-  (*       apply IHe in h1. *)
-  (*       lia. *)
-  (*     + intros [h| ->];simpl;[|lia]. *)
-  (*       apply IHe,h. *)
-  (* Qed. *)
-
-  (* Lemma KA_sat_length_proj  (o : O) (m : list gnl_exp) e : *)
-  (*   KA_sat m (gnl_reg_proj o e) -> 1 < length m. *)
-  (* Proof. *)
-  (*   revert m ;induction e;intros m ;simpl;try (now firstorder). *)
-  (*   - destruct (o0 =?= o);simpl;try tauto. *)
-  (*     intros (m1&m2&->&h1&h2). *)
-  (*     apply KA_sat_length_trad in h1,h2. *)
-  (*     rewrite length_app;lia. *)
-  (*   - destruct (o0 =?= o). *)
-  (*     + intros [h|(m1&m'&->&h1&m2&m3&->&h2&h3)]. *)
-  (*       * apply IHe;auto. *)
-  (*       * repeat rewrite length_app. *)
-  (*         apply KA_sat_length_trad in h1,h2. *)
-  (*         lia. *)
-  (*     + apply IHe. *)
-  (* Qed. *)
-
   Lemma KA_sat_gnl_sat_trad  (o : O) (l : list (GTerm A O)) m e :
     m |=(ka)= gnl_reg_trad o e -> list_lift (gnl_theo_sat Ø) l (Word_to_list m) ->
     exists s', GProd o l = Some s' /\ s' |=(Ø)= e.

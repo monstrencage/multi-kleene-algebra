@@ -2,47 +2,6 @@
 Require Import prelim ka cka.
 Require Import gnl.  
 
-(** * Helper functions *)
-
-(** Before we start, we define the following helper functions, and their specifications. *)
-
-(** [get_var] extracts variable from terms, and returns [None] for products. *)
-
-Definition get_var {X O} (e : GTerm X O) :=
-  match e with
-  | t_var a => Some a
-  | _ => None
-  end.
-
-(** The empty theory is consistent with this function. *)
-
-Lemma get_var_eq {X O} (e f : GTerm X O) :
-  Ø |- e =T= f -> get_var e = get_var f.
-Proof.
-  intro pr;induction pr;simpl;auto.
-  - etransitivity;eauto.
-  - inversion H.
-Qed.
-
-(** [get_op] does the opposite : it extracts the top operator from a term. *)
-
-Definition get_op {X O} (e : GTerm X O) :=
-  match e with
-  | t_var a => None
-  | _ -[o]- _ => Some o
-  end.
-
-(** It is also consistent with the empty theory. *)
-  
-Lemma get_op_eq {X O} (e f : GTerm X O) :
-  Ø |- e =T= f -> get_op e = get_op f.
-Proof.
-  intro pr;induction pr;simpl;auto.
-  - etransitivity;eauto.
-  - inversion H.
-Qed.
-
-
 Section slat.
   (** * Semi-lattices *)
   
@@ -590,21 +549,19 @@ Section ka_to_gnl.
 
   Lemma ewp_r_spec e : ewp_r e = true <-> 1_w |=(ka)= e.
   Proof.
-    unfold ewp_r;rewrite r_ewp_spec_iff.
+    unfold ewp_r;rewrite r_ewp_spec.
     replace [] with (Word_to_list 1_w) by reflexivity.
     symmetry;apply KA_reg_semantic_correspondance1.
   Qed.
   
   Lemma ewp_r_alt_spec e : ewp_r e = true <-> KA |- 1_r ≤ e.
   Proof.
-    unfold ewp_r;rewrite r_ewp_eq_iff;split;intro h.
+    unfold ewp_r;rewrite r_ewp_alt_spec;split;intro h.
     - apply KA_to_reg_theo in h.
       simpl in h.
       repeat rewrite Reg_to_reg_and_back in h.
       rewrite <- h;auto with proofs.
-    - apply reg_theo_to_KA in h.
-      unfold KA_inf in h;simpl in h.
-      rewrite <- h at 2;auto with proofs.
+    - apply reg_theo_to_KA in h;apply h.
   Qed.
     
 End ka_to_gnl.
@@ -891,7 +848,7 @@ Section cka_to_gnl.
 
   Lemma ewp_r_comm_spec e : ewp_r e = true <-> 1_w |=(cka)= e.
   Proof.
-    unfold ewp_r;rewrite r_ewp_spec_iff.
+    unfold ewp_r;rewrite r_ewp_spec.
     replace [] with (@Word_to_list A 1_w) by reflexivity.
     rewrite cKA_reg_semantic_correspondance1.
     rewrite cKA_sat_KA_sat.
@@ -904,7 +861,7 @@ Section cka_to_gnl.
   Lemma ewp_r_alt_comm_spec e : ewp_r e = true <-> cKA |- 1_r ≤ e.
   Proof.
     unfold ewp_r;split;intro h.
-    - rewrite r_ewp_eq_iff in h;apply KA_to_reg_theo in h.
+    - rewrite r_ewp_alt_spec in h;apply KA_to_reg_theo in h.
       simpl in h.
       repeat rewrite Reg_to_reg_and_back in h.
       rewrite <- h;auto with proofs.

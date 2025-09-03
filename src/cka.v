@@ -328,39 +328,39 @@ Infix "=cKA" := cKA_eq (at level 60).
 Infix "≤cKA" := cKA_inf (at level 60).
 Infix "|=cKA" := cKA_sat (at level 60).
 
-Section creg_functor.
+(* Section creg_functor. *)
 
-  Lemma Distr_cspec {A : Set} {decA : decidable_set A} (e : reg (list A)) :
-    forall w, w |=cKA Distr e <-> exists l, list_lift (@In A) w l /\ l |=cKA e.
-  Proof.
-    intros w.
-    repeat setoid_rewrite cKA_sat_KA_sat.
-    setoid_rewrite Distr_spec.
-    split.
-    - intros (l&hl&m&hm&hsat).
-      assert (multiset_lift (@In A) w m) as (l'&h1&h2)
-          by (apply multiset_lift_inv;exists l;split;auto).
-      exists l';split;auto.
-      exists m;split;auto.
-    - intros (l&h1&m&h2&hsat).
-      assert (multiset_lift (@In A) w m) as h3
-          by (exists l;split;auto).
-      apply multiset_lift_inv in h3 as (l'&h3&h4);exists l';split;auto.
-      exists m;split;auto. 
-  Qed.
+(*   Lemma Distr_cspec {A : Set} {decA : decidable_set A} (e : reg (list A)) : *)
+(*     forall w, w |=cKA Distr e <-> exists l, list_lift (@In A) w l /\ l |=cKA e. *)
+(*   Proof. *)
+(*     intros w. *)
+(*     repeat setoid_rewrite cKA_sat_KA_sat. *)
+(*     setoid_rewrite Distr_spec. *)
+(*     split. *)
+(*     - intros (l&hl&m&hm&hsat). *)
+(*       assert (multiset_lift (@In A) w m) as (l'&h1&h2) *)
+(*           by (apply multiset_lift_inv;exists l;split;auto). *)
+(*       exists l';split;auto. *)
+(*       exists m;split;auto. *)
+(*     - intros (l&h1&m&h2&hsat). *)
+(*       assert (multiset_lift (@In A) w m) as h3 *)
+(*           by (exists l;split;auto). *)
+(*       apply multiset_lift_inv in h3 as (l'&h3&h4);exists l';split;auto. *)
+(*       exists m;split;auto.  *)
+(*   Qed. *)
 
-  Context  {A : Set} {rA : relation A} {sumA : list A -> A} .
-  Inductive mixed_ceq: relation (reg A) :=
-  | mceq_refl e : mixed_ceq e e
-  | mceq_sym e f : mixed_ceq e f -> mixed_ceq f e
-  | mceq_trans e f g : mixed_ceq e f -> mixed_ceq f g -> mixed_ceq e g
-  | mceq_cka e f : e =cKA f -> mixed_ceq e f
-  | mceq_r e f : reg_lift rA e f -> mixed_ceq e f
-  | mceq_Distr E : mixed_ceq (Distr E) (reg_map sumA E).
+(*   Context  {A : Set} {rA : relation A} {sumA : list A -> A} . *)
+(*   Inductive mixed_ceq: relation (reg A) := *)
+(*   | mceq_refl e : mixed_ceq e e *)
+(*   | mceq_sym e f : mixed_ceq e f -> mixed_ceq f e *)
+(*   | mceq_trans e f g : mixed_ceq e f -> mixed_ceq f g -> mixed_ceq e g *)
+(*   | mceq_cka e f : e =cKA f -> mixed_ceq e f *)
+(*   | mceq_r e f : reg_lift rA e f -> mixed_ceq e f *)
+(*   | mceq_Distr E : mixed_ceq (Distr E) (reg_map sumA E). *)
 
-  Hint Constructors mixed_ceq : proofs.
-  Global Instance mixed_ceq_equiv : Equivalence mixed_ceq.
-  Proof. split;intro;intros;eauto with proofs. Qed.
+(*   Hint Constructors mixed_ceq : proofs. *)
+(*   Global Instance mixed_ceq_equiv : Equivalence mixed_ceq. *)
+(*   Proof. split;intro;intros;eauto with proofs. Qed. *)
   
-End creg_functor.
-Hint Constructors mixed_ceq : proofs.
+(* End creg_functor. *)
+(* Hint Constructors mixed_ceq : proofs. *)

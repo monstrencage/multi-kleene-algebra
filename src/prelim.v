@@ -1,12 +1,9 @@
 (** * gnl_alg.prelim : Preliminaries *)
 
-Require Export Coq.Relations.Relation_Definitions RelationClasses Classes.Morphisms.
-Require Export List Decidable Lists.ListDec.
-Require Export Psatz.
+From Stdlib Require Export Relations.Relation_Definitions RelationClasses Classes.Morphisms.
+From Stdlib Require Export List Decidable Lists.ListDec.
+From Stdlib Require Export Psatz.
 Export ListNotations.
-Require Import Coq.Logic.Eqdep_dec.
-Require Import Coq.Arith.Peano_dec.
-
 
 Create HintDb proofs.
 

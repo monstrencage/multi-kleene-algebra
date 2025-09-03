@@ -1,5 +1,5 @@
 Require Import prelim.
-Require Import gnl theories clean gnl_decomp.
+Require Import gnl theories gnl_decomp.
 
 Section gnl_recomp.
   Context {A : Set} {decA : decidable_set A}.
