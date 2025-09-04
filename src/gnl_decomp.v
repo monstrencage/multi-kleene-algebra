@@ -1,9 +1,89 @@
+(** * gnl_alg.gnl_decomp : decomposition of expressions *)
 Require Import prelim.
-Require Import gnl theories.
+Require Import gnl theories depth.
 
 Section gnl_decomp.
+  (** * Definition of the projections and decompositions *)
+  
+  (** We fix a decidable set of variables and a decidable set of operators. *)
+
   Context {A : Set} {decA : decidable_set A}.
   Context {O : Set} {decO : decidable_set O}.
+
+  (** A decomposition of a general term is either a variable or a pair of a *)
+  (** topmost operator with a list of general terms. *)
+  
+  Definition gnl_decomposition : Set := A + O * list (GTerm A O).
+
+  (** We define _valid_ decompositions, which will be the ones we will be interested in. *)
+  (** Variables are valid, and a pair [o,l] is valid provided that: *)
+  (** - [l] contains at least two elements; and *)
+  (** - no term [t] in [l] has topmost operator [o] (they are either variables or terms with a different topmost operator). *)
+  
+  Definition gnl_valid_elt (o : O) (t : GTerm A O) : bool :=
+    match t with
+    | t_var _ => true
+    | t_prod o' t1 t2 => if (o =?= o') then false else true
+    end.
+
+  Definition gnl_valid (t : gnl_decomposition) : bool :=
+    match t with
+    | inl _ => true
+    | inr (o,l) => Nat.ltb 1 (length l) && forallb (gnl_valid_elt o) l
+    end.
+
+  (** We will consider decomposition up-to the following equivalence relation, *)
+  (** parametered by a term theory [r]: *)
+  
+  Definition gnl_decomp_eq r : relation gnl_decomposition :=
+    fun d1 d2 =>
+      match d1,d2 with
+      | inl a,inl b => a = b
+      | inr (o,l),inr (o',m) => o = o' /\ list_lift (gnl_term_theo_eq r) l m
+      | _,_ => False
+      end.
+
+  (** The following pair of functions describes how general terms can be decomposed. *)
+  
+  Fixpoint gnl_term_to_list (o : O) (s : GTerm A O) : list (GTerm A O) :=
+    match s with
+    | t_var a => [t_var a]
+    | s -[i]- t => if i =?= o
+                   then (gnl_term_to_list o s)++(gnl_term_to_list o t)
+                   else [s -[i]- t]
+    end.
+
+  Definition gnl_decompose  (t : GTerm A O) : gnl_decomposition :=
+    match t with
+    | t_var a => inl a
+    | t_prod o t1 t2 => inr (o,gnl_term_to_list o (t_prod o t1 t2))
+    end.
+
+  (** From a decomposition, one can build back a general term (provided the *)
+  (** decomposition is valid). *)
+  
+  Definition gnl_recompose : gnl_decomposition -> option (GTerm A O) :=
+    fun s =>
+      match s with
+      | inl a => Some (t_var a)
+      | inr (o,l) => GProd o l
+      end.
+
+  (** [gnl_slat_proj e] extracts a [slat] expression that characterises the variables satisfying *)
+  (** the expression [e]. *)
+    
+  Fixpoint gnl_slat_proj (e : GExp A O) : slat A :=
+    match e with
+    | ø => ø
+    | var a => var a
+    | e + f => gnl_slat_proj e + gnl_slat_proj f
+    | e ×{i} f => ø
+    | e^{i} => gnl_slat_proj e
+    end.
+
+  (** [gnl_reg_trad o e] extracts the maximal top subexpression of [e] that only uses *)
+  (** the operator [o], and puts the other subexpressions inside variables. The result *)
+  (** is a regular expression over the set of variables [GExp A O]. *)
   
   Fixpoint gnl_reg_trad (o : O) (e : GExp A O) : Reg (GExp A O) :=
     match e with
@@ -18,6 +98,9 @@ Section gnl_decomp.
         else gnl_reg_trad o e + var_r (e ×{i} e^{i})
     end.
 
+  (** [gnl_reg_proj o e] is similar, except that it _kills_ (sets to [ø]) parts of the *)
+  (** expression that do not have operator [o] as the topmost operator. *)
+
   Fixpoint gnl_reg_proj (o : O) (e : GExp A O) : Reg (GExp A O) :=
     match e with
     | ø => ø
@@ -30,16 +113,28 @@ Section gnl_decomp.
         then gnl_reg_proj o e + (gnl_reg_trad o e @@ (gnl_reg_trad o e)^+ )
         else (gnl_reg_proj o e)
     end.
+
+  (** Now that we have decompositions and projections, we can define a new satisfaction relation, *)
+  (** relating decompositions with the expression's projections. *)
   
-  Fixpoint gnl_slat_proj (e : GExp A O) : slat A :=
-    match e with
+  Definition gnl_decomp_sat r (s : gnl_decomposition) (e : GExp A O) :=
+    match s with
+    | inl a => a |=slat= gnl_slat_proj e
+    | inr (o,l) => exists m, list_lift (gnl_theo_sat r) l (Word_to_list m)
+                             /\ m |=(ka)= (gnl_reg_proj o e)
+    end.
+  
+  (** The following pair of functions allows for the projections to be converted back *)
+  (** to [GExp A O]. *)
+  
+  Fixpoint slat_to_gnl (s : slat A) : GExp A O :=
+    match s with
     | ø => ø
     | var a => var a
-    | e + f => gnl_slat_proj e + gnl_slat_proj f
-    | e ×{i} f => ø
-    | e^{i} => gnl_slat_proj e
+    | e + f => slat_to_gnl e + slat_to_gnl f
+    | _ => ø
     end.
-
+  
   Fixpoint flatten (o : O) (e : Reg (GExp A O)) : GExp A O :=
     match e with
     | 1_r | ø => ø
@@ -51,64 +146,43 @@ Section gnl_decomp.
     | e^+ => iter o (flatten o e)
     end.
 
-  Fixpoint slat_to_gnl (s : slat A) : GExp A O :=
-    match s with
-    | ø => ø
-    | var a => var a
-    | e + f => slat_to_gnl e + slat_to_gnl f
-    | _ => ø
-    end.
+  (** * Facts about the decomposition *)
 
-  Lemma ewp_gnl_reg_trad (o : O) (e : GExp A O) :
-    ewp_r (gnl_reg_trad o e) = false.
+  (** ** Stability of validity *)
+  Global Instance gnl_valid_elt_proper rT o :
+    Proper (rT ==> eq) (gnl_valid_elt o) ->
+    Proper (gnl_term_theo_eq rT ==> eq) (gnl_valid_elt o).
+  Proof. intros hrT s t pr;induction pr;eauto. Qed.
+  Global Instance Ø_valid_elt_proper o :
+    Proper (Ø ==> eq) (gnl_valid_elt o).
+  Proof. intros s t []. Qed.
+
+  Global Instance gnl_valid_proper rT :
+    (forall o, Proper (rT ==> eq) (gnl_valid_elt o)) ->
+    Proper (gnl_decomp_eq rT ==> eq) gnl_valid.
   Proof.
-    induction e as [| | |i|i];simpl;try destruct (i =?= o);
-      unfold ewp_r in *;simpl in *;try rewrite IHe1,IHe2||rewrite IHe;auto with proofs.
+    intros hrT [|(o&l)] [|(o'&m)] h;simpl in h;try tauto.
+    destruct h as (->&h);simpl.
+    apply Bool.eq_iff_eq_true.
+    repeat rewrite Bool.andb_true_iff,PeanoNat.Nat.ltb_lt,forallb_forall.
+    rewrite (list_lift_length _ l m h).
+    cut
+      ((forall x : GTerm A O, In x l -> gnl_valid_elt o' x = true) <->
+         forall x : GTerm A O, In x m -> gnl_valid_elt o' x = true);
+      [intros ->;reflexivity|].
+    repeat rewrite <- Forall_forall.
+    revert m h;induction l;intros [] h;try (exfalso;apply h).
+    - simpl;tauto.
+    - repeat rewrite Forall_cons_iff.
+      destruct h as (h1&h2).
+      rewrite h1.
+      apply IHl in h2 as ->.
+      reflexivity.
   Qed.
 
-  Lemma ewp_gnl_reg_proj (o : O) (e : GExp A O) :
-    ewp_r (gnl_reg_proj o e) = false.
-  Proof.
-    induction e as [| | |i|i];simpl;try destruct (i =?= o);
-      unfold ewp_r in *;simpl in *;try rewrite IHe1,IHe2||rewrite IHe;auto with proofs.
-    - pose proof (ewp_gnl_reg_trad o e1) as E1;
-        pose proof (ewp_gnl_reg_trad o e2) as E2;
-        unfold ewp_r in *;rewrite E1,E2;reflexivity.
-    - pose proof (ewp_gnl_reg_trad o e) as E;
-        unfold ewp_r in *;rewrite E;reflexivity.
-  Qed.
+  (** ** General properties of decompostions *)
+  (** As expected, our relation on decompositions is an equivalence relation. *)
   
-  Lemma flatten_gnl_reg_trad (o : O) (e : GExp A O) :
-    Ø |- e == flatten o (gnl_reg_trad o e).
-  Proof.
-    induction e as [ | | |i|i];simpl;auto;try destruct (i =?= o);subst;simpl;
-      repeat rewrite ewp_gnl_reg_trad;
-      try (rewrite <-IHe1,<-IHe2)||(rewrite <-IHe);simpl;
-      try (eexists;split;[reflexivity|]);try reflexivity||auto with proofs.
-    - cut (forall e : GExp A O, gnl_theo_eq Ø (sum zero e) e).
-      + intro h;repeat rewrite h;reflexivity.
-      + clear;intro;split;auto with proofs.
-    - split;eauto with proofs.
-  Qed.
-
-  Fixpoint gnl_term_to_list (o : O) (s : GTerm A O) : list (GTerm A O) :=
-    match s with
-    | t_var a => [t_var a]
-    | s -[i]- t => if i =?= o
-                      then (gnl_term_to_list o s)++(gnl_term_to_list o t)
-                      else [s -[i]- t]
-    end.
-
-  Definition gnl_decomposition : Set := A + O * list (GTerm A O).
-
-  Definition gnl_decomp_eq r : relation gnl_decomposition :=
-    fun d1 d2 =>
-      match d1,d2 with
-      | inl a,inl b => a = b
-      | inr (o,l),inr (o',m) => o = o' /\ list_lift (gnl_term_theo_eq r) l m
-      | _,_ => False
-      end.
-
   Global Instance gnl_decomp_eq_Equivalence r : Equivalence (gnl_decomp_eq r).
   Proof.
     split.
@@ -120,31 +194,33 @@ Section gnl_decomp.
         repeat split;auto;etransitivity;eassumption.
   Qed.
 
-  Definition gnl_recompose : gnl_decomposition -> option (GTerm A O) :=
-    fun s =>
-      match s with
-      | inl a => Some (t_var a)
-      | inr (o,l) => GProd o l
-      end.
+  
+  (** [gnl_term_to_list] always return a non-empty list. *)
+  Lemma gnl_term_to_list_not_nil o (s : GTerm A O) :
+    gnl_term_to_list o s <> [].
+  Proof.
+    induction s;try discriminate.
+    simpl;destruct (o0 =?= o);[|discriminate].
+    intro h;apply app_eq_nil in h as (h1&h2).
+    tauto.
+  Qed.
 
-  Definition gnl_decompose  (t : GTerm A O) : gnl_decomposition :=
-    match t with
-    | t_var a => inl a
-    | t_prod o t1 t2 => inr (o,gnl_term_to_list o (t_prod o t1 t2))
-    end.
-
-  Definition gnl_valid_elt (o : O) (t : GTerm A O) : bool :=
-    match t with
-    | t_var _ => true
-    | t_prod o' t1 t2 => if (o =?= o') then false else true
-    end.
-
-  Definition gnl_valid (t : gnl_decomposition) : bool :=
-    match t with
-    | inl _ => true
-    | inr (o,l) => Nat.ltb 1 (length l) && forallb (gnl_valid_elt o) l
-    end.
-
+  (** [gnl_term_to_list o s] return a list of terms that are valid according to [gnl_valid_elt o]. *)
+  
+  Lemma gnl_term_to_list_valid_elt o x s :
+    In x (gnl_term_to_list o s) -> gnl_valid_elt o x = true.
+  Proof.
+    induction s;simpl.
+    - intros [<-|F];[ |tauto];reflexivity.
+    -  destruct (o0 =?= o);simpl;
+         try setoid_rewrite in_app_iff;intros h;repeat (destruct h as [h|h];subst);simpl;try tauto.
+       rewrite eq_dec_neq by (intros ->;tauto).
+       reflexivity.
+  Qed.
+    
+  (** With the two previous lemmas, we can show that our decomposition function *)
+  (** only returns valid decompositions. *)
+  
   Lemma gnl_decompose_valid  (t : GTerm A O) :
     gnl_valid (gnl_decompose t) = true.
   Proof.
@@ -153,81 +229,18 @@ Section gnl_decomp.
     simpl;apply Bool.andb_true_iff.
     rewrite <- (Bool.reflect_iff _ _ (PeanoNat.Nat.ltb_spec0 _ _)).
     rewrite forallb_forall.
-    induction t1.
-    - induction t2;simpl.
-      + split;[lia|].
-        intros ? [<-|[<-|F]];[| |tauto];reflexivity.
-      + destruct (o0 =?= o);simpl;repeat rewrite length_app in *;simpl in *;(split;[lia|]);
-          try setoid_rewrite in_app_iff;intros ? h;repeat (destruct h as [h|h];subst);simpl;try tauto.
-          -- apply IHt2_1;now right.
-          -- apply IHt2_2;now right.
-          -- rewrite eq_dec_neq by (intros ->;apply n;reflexivity);reflexivity.
-    - repeat rewrite length_app in *.
-      setoid_rewrite in_app_iff.
-      setoid_rewrite in_app_iff in IHt1_1.
-      setoid_rewrite in_app_iff in IHt1_2.
-      simpl.
-      destruct (o0 =?= o);simpl;[rewrite length_app|];(split;[try lia|]).
-      + setoid_rewrite in_app_iff.
-        intros x [[hx|hx]|hx];(apply IHt1_1;tauto)||(apply IHt1_2;tauto). 
-      + clear.
-        induction t2;simpl.
-        * lia.
-        * destruct (o0 =?= o).
-          -- rewrite length_app.
-             lia.
-          -- simpl;lia.
-      + intros x [[<-|hx]|hx];try tauto.
-        * simpl.
-          rewrite eq_dec_neq by (intros->;apply n;reflexivity).
-          reflexivity.
-        * apply IHt1_2;tauto.
+    split.
+    - rewrite length_app.
+      pose proof (gnl_term_to_list_not_nil o t1) as h1;
+        pose proof (gnl_term_to_list_not_nil o t2) as h2.
+      destruct (gnl_term_to_list o t1),(gnl_term_to_list o t2);try tauto.
+      simpl;lia.
+    - intro;rewrite in_app_iff;intros [h|h];eapply gnl_term_to_list_valid_elt,h.
   Qed.
 
-  Definition gnl_decomp_sat r (s : gnl_decomposition) (e : GExp A O) :=
-    match s with
-    | inl a => a |=slat= gnl_slat_proj e
-    | inr (o,l) => exists m, list_lift (gnl_theo_sat r) l (Word_to_list m)
-                             /\ m |=(ka)= (gnl_reg_proj o e)
-    end.
-
-
-  Lemma gnl_sat_vars  (e : gnl_exp) :
-    forall x, t_var x |=(Ø)= e -> x |=slat= gnl_slat_proj e.
-  Proof.
-    induction e;simpl.
-    - tauto.
-    - intros x0 E;apply get_var_eq in E;inversion E;reflexivity.
-    - intuition.
-    - intros x (s1&s2&E&_&_).
-      apply get_var_eq in E;inversion E. 
-    - intros x (s'&L&hs'&E&hL).
-      revert s' hs' E.
-      induction L;simpl.
-      + discriminate.
-      + intros s' hs' E.
-        destruct (GProd o L);inversion hs';subst;clear hs'.
-        * apply get_var_eq in E;discriminate.
-        * apply IHe,hL;left.
-          apply get_var_eq in E.
-          destruct s';inversion E.
-          reflexivity.
-  Qed.
+  (** A useful observation: [gnl_decompose] and [gnl_term_to_list] enjoy the *)
+  (** following correspondance: *)
   
-  Lemma gnl_sat_vars_iff  (e : gnl_exp) :
-    forall x, t_var x |=(Ø)= e <-> x |=slat= gnl_slat_proj e.
-  Proof.
-    intro x;split;[apply gnl_sat_vars|revert x].
-    induction e;simpl.
-    - tauto.
-    - intros a E;apply get_var_eq in E;inversion E;reflexivity.
-    - intuition.
-    - tauto. 
-    - intros x ih;apply IHe in ih.
-      exists (t_var x),[t_var x];repeat split;auto with proofs.
-      intros ? [<-|F];[|exfalso;apply F];auto.
-  Qed.
-
   Lemma gnl_decompose_gnl_term_to_list (s : GTerm A O) :
     forall o l, gnl_decompose s = inr (o,l) -> gnl_term_to_list o s = l.
   Proof.
@@ -237,6 +250,10 @@ Section gnl_decomp.
     rewrite eq_dec_eq.
     reflexivity.
   Qed.
+
+  (** The following will be useful in case analyses: if a pair of term is equivalent *)
+  (** according to the empty theory, either both are the same variable, or they can be *)
+  (** decomposed as pairs of a shared operator [o] and elementwise equivalent lists. *)
   
   Lemma gnl_decompose_eq :
     forall s t : GTerm A O,
@@ -255,71 +272,39 @@ Section gnl_decomp.
     - firstorder.
       right;exists x,x1,x0;repeat split;auto.
       symmetry;assumption.
-    - firstorder subst.
-      + inversion H2;subst;clear H2.
-        left;exists x0;tauto.
-      + simpl in H2;discriminate.
-      + simpl in H;discriminate.
-      + rewrite H in H3.
-        inversion H3;subst;clear H3.
-        right;exists x2,x3,x1;repeat split;auto.
-        transitivity x4;assumption.
-    - firstorder subst.
-      + apply get_var_eq in pr1,pr2;simpl in *.
-        inversion pr1;inversion pr2;subst;clear pr1 pr2.
-        repeat rewrite eq_dec_eq.
-        right.
-        eexists;eexists;eexists;repeat (split;[reflexivity|]).
-        reflexivity.
-      + repeat rewrite eq_dec_eq.
-        right;eexists;eexists;eexists;repeat (split;[reflexivity|]).
-        simpl.
-        destruct (x0 =?= o).
+    - destruct IHpr1 as [(a1&->&->)|(o1&le&lf1&he&hf1&hef)],
+         IHpr2 as [(a2&E&->)|(o2&lf2&lg&hf2&hg&hfg)].
+     + inversion E;subst; left;exists a2;tauto.
+     + discriminate.
+     + subst;discriminate.
+     + rewrite hf1 in hf2;inversion hf2;subst;clear hf2.
+       right;exists o2,le,lg;repeat split;auto.
+       transitivity lf2;auto.
+    - repeat rewrite eq_dec_eq;right.
+      exists o;eexists;eexists;repeat split;try reflexivity.
+      apply app_list_lift.
+      + destruct IHpr1 as [(a1&->&->)|(o1&le1&le2&he1&he2&he)];simpl;auto.
+        destruct (o =?= o1).
         * subst.
-          rewrite (gnl_decompose_gnl_term_to_list _ _ _ H1).
-          rewrite (gnl_decompose_gnl_term_to_list _ _ _ H2).
-          rewrite H3.
-          reflexivity.
-        * destruct e1;try discriminate.
-          destruct e2;try discriminate.
-          simpl in *.
-          inversion H1;subst.
-          inversion H2;subst.
-          repeat rewrite eq_dec_neq by assumption.
-          repeat rewrite eq_dec_eq in H3.
-          simpl;repeat split;reflexivity||assumption.
-      + right;exists o;repeat rewrite eq_dec_eq.
-        eexists;eexists;repeat (split;[reflexivity|]).
-        simpl.
-        destruct (x =?= o).
+          rewrite (gnl_decompose_gnl_term_to_list _ _ _ he1).
+          rewrite (gnl_decompose_gnl_term_to_list _ _ _ he2).
+          auto.
+        * destruct e1;simpl;inversion he1;subst.
+          rewrite eq_dec_eq in *;rewrite eq_dec_neq by (intros ->;tauto).
+          destruct e2;simpl;inversion he2;subst.
+          rewrite eq_dec_eq in *;rewrite eq_dec_neq by (intros ->;tauto).
+          split;auto.
+      + destruct IHpr2 as [(a2&->&->)|(o2&lf1&lf2&hf1&hf2&hf)];simpl;auto.
+        destruct (o =?= o2).
         * subst.
-          rewrite (gnl_decompose_gnl_term_to_list _ _ _ H0).
-          rewrite (gnl_decompose_gnl_term_to_list _ _ _ H).
-          assumption.
-        * destruct f1;try discriminate.
-          destruct f2;try discriminate.
-          simpl in *.
-          repeat rewrite eq_dec_eq in *.
-          inversion H;subst.
-          inversion H0;subst.
-          repeat rewrite eq_dec_neq by assumption.
-          simpl;repeat split;reflexivity||assumption.
-      + right;exists o;repeat rewrite eq_dec_eq.
-        eexists;eexists;repeat (split;[reflexivity|]).
-        destruct f1;try discriminate.
-        destruct f2;try discriminate.
-        destruct e1;try discriminate.
-        destruct e2;try discriminate.
-        simpl in *.
-        repeat rewrite eq_dec_eq in *.
-        inversion H;subst.
-        inversion H0;subst.
-        inversion H3;subst.
-        inversion H2;subst.
-        clear H H0 H2 H3.
-        destruct (x2 =?= o);destruct (x =?= o);subst;simpl;auto.
-        * apply app_list_lift;auto.
-        * apply app_list_lift;simpl;auto.
+          rewrite (gnl_decompose_gnl_term_to_list _ _ _ hf1).
+          rewrite (gnl_decompose_gnl_term_to_list _ _ _ hf2).
+          auto.
+        * destruct f1;simpl;inversion hf1;subst.
+          rewrite eq_dec_eq in *;rewrite eq_dec_neq by (intros ->;tauto).
+          destruct f2;simpl;inversion hf2;subst.
+          rewrite eq_dec_eq in *;rewrite eq_dec_neq by (intros ->;tauto).
+          split;auto.
     - repeat rewrite eq_dec_eq.
       rewrite <- app_assoc.
       right;exists o.
@@ -328,14 +313,25 @@ Section gnl_decomp.
     - inversion H.
   Qed.
 
-  Lemma gnl_term_to_list_not_nil (s : GTerm A O) o :
-    gnl_term_to_list o s <> [].
+  (** [gnl_term_to_list] is a morphism from terms up-to the empty theory to lists up-to *)
+  (** elementwise equivalence. *)
+  
+  Global Instance gnl_term_to_list_proper (o : O) :
+    Proper (gnl_term_theo_eq Ø ==> list_lift (gnl_term_theo_eq Ø)) (gnl_term_to_list o).
   Proof.
-    induction s;try discriminate.
-    simpl;destruct (o0 =?= o);[|discriminate].
-    intro h;apply app_eq_nil in h as (h1&h2).
-    tauto.
+    intros e f pr;induction pr.
+    - reflexivity.
+    - symmetry;assumption.
+    - etransitivity;eassumption.
+    - simpl;destruct (o0 =?= o);[apply app_list_lift|split;[|reflexivity]];auto with proofs.
+    - simpl;destruct (o0 =?= o);[rewrite <- app_assoc|rewrite gnlt_prod_assoc];reflexivity.
+    - inversion H.
   Qed.
+
+  (** For the next result, we need the following auxiliary result: if [gnl_term_to_list o t] is *)
+  (** elementwise equivalent to a concatenation [l++m], then we can build terms [s1] and [s2] *)
+  (** such that [t] is equivalent to the product [s1-[o]-s2] and [s1] corresponds to [l] and *)
+  (** [s2] corresponds to [m]. *)
 
   Lemma gnl_term_eq_app (t : GTerm A O) o l m :
     l<> [] -> m <> [] ->
@@ -390,6 +386,8 @@ Section gnl_decomp.
          inversion h.
          apply app_eq_nil in H1 as (_&F);tauto.
   Qed.
+
+  (** With this we can show that [gnl_term_to_list] enjoys a form of injectivity: *)
   
   Lemma gnl_term_to_list_gnl_term_eq (s t : GTerm A O) o :
     list_lift (gnl_term_theo_eq Ø) (gnl_term_to_list o s) (gnl_term_to_list o t) ->
@@ -425,6 +423,176 @@ Section gnl_decomp.
           eapply gnl_term_to_list_not_nil,f.
   Qed.
 
+  (** Valid decompostion recompose to actual terms (no [None] value). *)
+  
+  Lemma gnl_recompose_Some d : gnl_valid d = true -> exists t, gnl_recompose d = Some t.
+  Proof.
+    destruct d as [a|(o,l)];simpl.
+    - intros _;eexists;reflexivity.
+    - intros h;apply GProd_Some.
+      apply Bool.andb_true_iff in h as (h&_).
+      apply PeanoNat.Nat.ltb_lt in h.
+      intros ->;simpl in h;lia.
+  Qed.
+
+  (** For terms that are valid according to [gnl_valid_elt o], [gnl_term_to_list o] just returns *)
+  (** the singleton list containing the term itself. *)
+  Lemma gnl_valid_elt_to_list_sngl o a :
+    gnl_valid_elt o a = true -> gnl_term_to_list o a = [a].
+  Proof.
+    destruct a as [|o'];simpl;[|destruct (o' =?= o);[subst;rewrite eq_dec_eq
+                                                    |rewrite eq_dec_neq by (intros ->;tauto)]];
+      discriminate||reflexivity.
+  Qed.
+
+  (** Since [gnl_term_to_list] dose not return the empty list, the [GProd] of its output is *)
+  (** well defined. *)
+  
+  Lemma GProd_gnl_term_to_list_Some (s : GTerm A O) o :
+    exists t, GProd o (gnl_term_to_list o s) = Some t.
+  Proof. apply GProd_Some,gnl_term_to_list_not_nil. Qed.
+
+  (** Furthermore, that output is equivalent to the original term. *)
+  
+  Lemma GProd_gnl_term_to_list_eq (s t : GTerm A O) o :
+    GProd o (gnl_term_to_list o s) = Some t -> Ø |- s =T= t.
+  Proof.
+    revert t;induction s as [|o'];simpl;intros s E.
+    - inversion E;reflexivity.
+    - destruct (o' =?= o).
+      + destruct (GProd_gnl_term_to_list_Some s1 o) as (s'1&Es1).
+        destruct (GProd_gnl_term_to_list_Some s2 o) as (s'2&Es2).
+        destruct (GProd_app Ø _ _ _ _ _ Es1 Es2) as (s'&E'&Es).
+        rewrite E in E';symmetry in E';inversion E';subst;clear E'.
+        rewrite Es.
+        rewrite IHs1,IHs2 by eassumption.
+        reflexivity.
+      + inversion E;reflexivity.
+  Qed.
+
+  (** ** From terms to decompositions and back *)
+
+  (** [gnl_recompose] is a morphism w.r.t. any theory [rT] . *)
+
+  Global Instance gnl_recompose_proper rT :
+    Proper (gnl_decomp_eq rT ==> or_none (gnl_term_theo_eq rT)) gnl_recompose.
+  Proof.
+    intros [a|(o,l)] [b|(o',m)];simpl;try tauto.
+    - intros ->;reflexivity.
+    - intros (<-&h).
+      rewrite h;reflexivity.
+  Qed.
+
+  (** The same does not hold for [gnl_decompose] with arbitrary theories, but it is true *)
+  (** in the case of the empty theory. *)
+  
+  Global Instance gnl_decompose_proper :
+    Proper (gnl_term_theo_eq Ø ==> gnl_decomp_eq Ø) gnl_decompose.
+  Proof.
+    intros ? ? h.
+    destruct (gnl_decompose_eq _ _ h) as [(a&->&->)|(o&l&m&->&->&hlm)];[reflexivity|].
+    simpl;split;auto.
+  Qed.
+
+  (** We can show that valid decompositions recompose to terms that decompose back into them. *)
+  
+  Lemma decompose_recompose (s : gnl_decomposition) t :
+    gnl_valid s = true -> gnl_recompose s = Some t -> gnl_decompose t = s.
+  Proof.
+    destruct s as [a|(o,l)];simpl.
+    - intros _ E;inversion E;subst;clear E.
+      reflexivity.
+    - rewrite Bool.andb_true_iff,PeanoNat.Nat.ltb_lt,forallb_forall.
+      intros (hlen&hl) E.
+      revert t E;induction l;[subst;simpl in *;discriminate|intros t E].
+      destruct (l =?= []);simpl in E;[subst;clear IHl;simpl in hlen;lia
+                                     |apply (GProd_Some _ o) in n as (s&hs);rewrite hs in E];
+        inversion E;subst;clear E.
+      + clear hlen.
+        assert (ha: In a (a::l)) by (now left);apply hl in ha;simpl.
+        rewrite eq_dec_eq,(gnl_valid_elt_to_list_sngl _ _ ha);simpl;repeat f_equal.
+        destruct (PeanoNat.Nat.lt_ge_cases 1 (length l)) as [len|len].
+        * apply IHl in hs;[| |intros;apply hl;simpl];auto.
+          destruct s as [|o'];inversion hs;subst;simpl;repeat rewrite eq_dec_eq in *.
+          reflexivity.
+        * destruct l as [|? [|]];[discriminate|inversion hs;subst;clear hs|simpl in len;lia].
+          apply gnl_valid_elt_to_list_sngl,hl;now right;left.
+  Qed.
+
+  (** We also show that recomposing the decomposition of a term yields a (possibly different *)
+  (** but) equivalent term. *)
+  
+  Lemma recompose_decompose (s : GTerm A O) :
+    exists t, gnl_recompose (gnl_decompose s) = Some t /\ Ø |- s =T= t.
+  Proof.
+    destruct s;simpl.
+    - eexists;split;reflexivity.
+    - rewrite eq_dec_eq.
+      revert s2;induction s1 as [|o'];intros s2.
+      + simpl.
+        destruct (GProd_gnl_term_to_list_Some s2 o) as (s&Es).
+        rewrite Es.
+        eexists;split;[reflexivity|].
+        apply gnlt_prod;[reflexivity|].
+        eapply GProd_gnl_term_to_list_eq;eassumption.
+      + simpl;destruct (o' =?= o).
+        * subst.
+          rewrite <- app_assoc.
+          replace (_ o s1_2 ++ _) with (gnl_term_to_list o (t_prod o s1_2 s2))
+            by now (simpl;rewrite eq_dec_eq).
+          setoid_rewrite <- gnlt_prod_assoc.
+          apply IHs1_1.
+        * simpl.
+          destruct (GProd_gnl_term_to_list_Some s2 o) as (s'2&Es'2).
+          rewrite Es'2.
+          eexists;split;[reflexivity|].
+          apply  GProd_gnl_term_to_list_eq in Es'2 as ->.
+          reflexivity.
+  Qed.
+
+  (** * Facts about the projections *)
+
+  (** Both [gnl_reg_trad] and [gnl_reg_proj] produce regular expression that do not *)
+  (** enjoy the empty word property. *)
+  
+  Lemma ewp_gnl_reg_trad (o : O) (e : GExp A O) :
+    ewp_r (gnl_reg_trad o e) = false.
+  Proof.
+    induction e as [| | |i|i];simpl;try destruct (i =?= o);
+      unfold ewp_r in *;simpl in *;try rewrite IHe1,IHe2||rewrite IHe;auto with proofs.
+  Qed.
+
+  Lemma ewp_gnl_reg_proj (o : O) (e : GExp A O) :
+    ewp_r (gnl_reg_proj o e) = false.
+  Proof.
+    induction e as [| | |i|i];simpl;try destruct (i =?= o);
+      unfold ewp_r in *;simpl in *;try rewrite IHe1,IHe2||rewrite IHe;auto with proofs.
+    - pose proof (ewp_gnl_reg_trad o e1) as E1;
+        pose proof (ewp_gnl_reg_trad o e2) as E2;
+        unfold ewp_r in *;rewrite E1,E2;reflexivity.
+    - pose proof (ewp_gnl_reg_trad o e) as E;
+        unfold ewp_r in *;rewrite E;reflexivity.
+  Qed.
+
+  (** [gnl_reg_trad] is non-destructive, since we can get back from it an expression *)
+  (** that is equivalent to the original argument. *)
+  
+  Lemma flatten_gnl_reg_trad (o : O) (e : GExp A O) :
+    Ø |- e == flatten o (gnl_reg_trad o e).
+  Proof.
+    induction e as [ | | |i|i];simpl;auto;try destruct (i =?= o);subst;simpl;
+      repeat rewrite ewp_gnl_reg_trad;
+      try (rewrite <-IHe1,<-IHe2)||(rewrite <-IHe);simpl;
+      try (eexists;split;[reflexivity|]);try reflexivity||auto with proofs.
+    - cut (forall e : GExp A O, gnl_theo_eq Ø (sum zero e) e).
+      + intro h;repeat rewrite h;reflexivity.
+      + clear;intro;split;auto with proofs.
+    - split;eauto with proofs.
+  Qed.
+
+  (** Helper lemma to lift the invariance of [|=(ø)=] with respect equivalences on *)
+  (** terms and expression to lists up-to elementwise equivalence. *)
+  
   Lemma list_lift_gnl_sat_modulo_eq  :
     forall (s1 s2 : list (GTerm A O)) e1 e2,
       list_lift (gnl_term_theo_eq Ø) s1 s2 ->
@@ -433,17 +601,65 @@ Section gnl_decomp.
       list_lift (gnl_theo_sat Ø) s2 e2.
   Proof. intros l1 l2 m1 m2 hl hsat hm;rewrite <- hl,<-hm; assumption. Qed.
 
-  Global Instance gnl_term_to_list_proper (o : O) :
-    Proper (gnl_term_theo_eq Ø ==> list_lift (gnl_term_theo_eq Ø)) (gnl_term_to_list o).
+  (** The interpretation of [gnl_reg_proj o e] is contained in that of [gnl_reg_trad o e]. *)
+
+  Lemma gnl_reg_proj_reg_trad_sat  (e : gnl_exp) o m :
+    m |=(ka)= gnl_reg_proj o e -> m |=(ka)= gnl_reg_trad o e.
   Proof.
-    intros e f pr;induction pr.
-    - reflexivity.
-    - symmetry;assumption.
-    - etransitivity;eassumption.
-    - simpl;destruct (o0 =?= o);[apply app_list_lift|split;[|reflexivity]];auto with proofs.
-    - simpl;destruct (o0 =?= o);[rewrite <- app_assoc|rewrite gnlt_prod_assoc];reflexivity.
-    - inversion H.
+    revert m;induction e;simpl;intros m hsat;try tauto||discriminate.
+    - intuition.
+    - destruct (o0 =?= o);simpl in *;tauto.
+    - destruct (o0 =?= o).
+      + destruct hsat as [hsat|hsat];auto.
+        * apply IHe in hsat. 
+          exists m,[m];repeat split;auto with proofs.
+          intros ? [<-|h];[|exfalso];auto.
+        * destruct hsat as (m1&m'&->&hm1&m2&L&E&hm2&hL).
+          exists (m1 ** m2),(m1::L);simpl;rewrite E;split;auto.
+          rewrite hm2;split;auto with proofs.
+          intros ? [<-|h];[|apply hL];auto.
+      + apply IHe in hsat.
+        left;assumption.
   Qed.
+
+  (** * Semantic correspondance *)
+  (** We now proceed to show an equivalence between the terms satisfying [e] and the *)
+  (** decompositions satisfying [e]'s projections. *)
+
+  (** ** Preliminary work *)
+  (** A variable satisfies [e] iff it satisfies the [slat] projection of [e]. *)
+  
+  Lemma gnl_sat_vars  (e : gnl_exp) :
+    forall x, t_var x |=(Ø)= e <-> x |=slat= gnl_slat_proj e.
+  Proof.
+    intros x;split;revert x;induction e;simpl.
+    - tauto.
+    - intros x0 E;apply get_var_eq in E;inversion E;reflexivity.
+    - intuition.
+    - intros x (s1&s2&E&_&_).
+      apply get_var_eq in E;inversion E. 
+    - intros x (s'&L&hs'&E&hL).
+      revert s' hs' E.
+      induction L;simpl.
+      + discriminate.
+      + intros s' hs' E.
+        destruct (GProd o L);inversion hs';subst;clear hs'.
+        * apply get_var_eq in E;discriminate.
+        * apply IHe,hL;left.
+          apply get_var_eq in E.
+          destruct s';inversion E.
+          reflexivity.
+    - tauto.
+    - intros a E;apply get_var_eq in E;inversion E;reflexivity.
+    - intuition.
+    - tauto. 
+    - intros x ih;apply IHe in ih.
+      exists (t_var x),[t_var x];repeat split;auto with proofs.
+      intros ? [<-|F];[|exfalso;apply F];auto.
+  Qed.
+
+  (** Every term satisfying [e] can be fashioned into a decomposition *)
+  (** satisfying [gnl_reg_trad o e]. *)
   
   Lemma gnl_reg_trad_sat (e : gnl_exp) :
     forall s o, s |=(Ø)= e ->  
@@ -462,12 +678,12 @@ Section gnl_decomp.
         exists m;simpl;auto.
       + destruct (IHe2 s o) as (m&h1&h2);auto.
         exists m;simpl;auto.
-    - firstorder.
-       destruct (IHe1 x o) as (m1&h11&h12);auto.
-       destruct (IHe2 x0 o) as (m2&h21&h22);auto.
-       apply gnl_decompose_eq in H as [(a&_&F)|(o'&l'&m&hl&hm&h)];[discriminate|].
+    - intros s o' (s1&s2&hs&hs1&hs2).
+      destruct (IHe1 s1 o) as (m1&h11&h12);auto.
+      destruct (IHe2 s2 o) as (m2&h21&h22);auto.
+      apply gnl_decompose_eq in hs as [(a&_&F)|(o''&l'&m&hl&hm&h)];[discriminate|].
        simpl in hm;rewrite eq_dec_eq in hm;symmetry in hm;inversion hm;subst;clear hm.
-       destruct (o =?= o0).
+       destruct (o =?= o').
       + symmetry in e;subst.
         erewrite gnl_decompose_gnl_term_to_list by eassumption.
         exists (m1 ** m2);split.
@@ -486,7 +702,7 @@ Section gnl_decomp.
         rewrite eq_dec_neq by assumption.
         rewrite eq_dec_eq in *.
         split;simpl;auto.
-        exists x,x0;repeat split;auto.
+        exists s1,s2;repeat split;auto.
         revert h;clear.
         intro h.
         apply (gnl_term_to_list_gnl_term_eq _ _ o).
@@ -541,25 +757,9 @@ Section gnl_decomp.
           assumption.
   Qed.
 
-  Lemma gnl_reg_proj_reg_trad_sat  (e : gnl_exp) o m :
-    m |=(ka)= gnl_reg_proj o e -> m |=(ka)= gnl_reg_trad o e.
-  Proof.
-    revert m;induction e;simpl;intros m hsat;try tauto||discriminate.
-    - intuition.
-    - destruct (o0 =?= o);simpl in *;tauto.
-    - destruct (o0 =?= o).
-      + destruct hsat as [hsat|hsat];auto.
-        * apply IHe in hsat. 
-          exists m,[m];repeat split;auto with proofs.
-          intros ? [<-|h];[|exfalso];auto.
-        * destruct hsat as (m1&m'&->&hm1&m2&L&E&hm2&hL).
-          exists (m1 ** m2),(m1::L);simpl;rewrite E;split;auto.
-          rewrite hm2;split;auto with proofs.
-          intros ? [<-|h];[|apply hL];auto.
-      + apply IHe in hsat.
-        left;assumption.
-  Qed.
-
+  (** For every term satisfying [e] whose decomposition is a pair [o,l], that pair satisfies *)
+  (** [gnl_reg_proj o e]. *)
+  
   Lemma gnl_reg_proj_sat (e : gnl_exp) :
     forall s o l,  s |=(Ø)= e -> gnl_decompose s = inr (o,l) -> 
                    exists m, list_lift (gnl_theo_sat Ø) l (Word_to_list m)
@@ -670,6 +870,9 @@ Section gnl_decomp.
          * destruct s;simpl in hs;try rewrite eq_dec_eq in hs;inversion hs;subst;clear hs.
            apply get_op_eq in hs';simpl in hs';inversion hs';subst;tauto.
   Qed.
+
+  (** It is now straightforward to show that for every term satisfying [e], its decomposition *)
+  (** satisfies one of [e]'s projections. *)
   
   Lemma gnl_decompose_sat
     (s : GTerm A O) (e : gnl_exp) :
@@ -686,6 +889,9 @@ Section gnl_decomp.
   Qed.
 
 
+  (** Conversely, for every decomposition satisfying [e]'s projections, its recomposed *)
+  (** term satisfies [e]. *)
+  
   Lemma gnl_recompose_sat (s: gnl_decomposition) e :
     gnl_decomp_sat Ø s e -> exists t, gnl_recompose s = Some t /\ t |=(Ø)= e.
   Proof.
@@ -776,145 +982,7 @@ Section gnl_decomp.
              intros ? [<-|h];[|apply hL];auto.
   Qed.
 
-  Lemma decompose_recompose (s : gnl_decomposition) t :
-    gnl_valid s = true -> gnl_recompose s = Some t -> gnl_decompose t = s.
-  Proof.
-    destruct s as [a|(o,l)];simpl.
-    - intros _ E;inversion E;subst;clear E.
-      reflexivity.
-    - rewrite Bool.andb_true_iff,PeanoNat.Nat.ltb_lt,forallb_forall.
-      revert t;induction l;simpl;[lia|].
-      intros t (hlen&hl) E.
-      cut (l = [] \/ (exists t', l = [t']) \/ (lt 1 (length l) /\ exists t', GProd o l = Some t')).
-      + intros [->|[(t'&->)|(hlen'&t'&E')]];simpl in E;try rewrite E' in *;inversion E;subst;clear E.
-        * simpl in hlen;lia.
-        * simpl;rewrite eq_dec_eq;repeat f_equal.
-          cut (gnl_term_to_list o a = [a] /\ gnl_term_to_list o t' = [t']);
-            [intros (->&->);reflexivity|split].
-          -- destruct a;simpl;auto.
-             destruct (o0 =?= o);simpl;auto.
-             subst.
-             exfalso.
-             cut (gnl_valid_elt o (t_prod o a1 a2) = false).
-             ++ apply Bool.not_false_iff_true.
-                apply hl;now left.
-             ++ simpl;rewrite eq_dec_eq.
-                reflexivity.
-          -- destruct t';simpl;auto.
-             destruct (o0 =?= o);simpl;auto.
-             subst.
-             exfalso.
-             cut (gnl_valid_elt o (t_prod o t'1 t'2) = false).
-             ++ apply Bool.not_false_iff_true.
-                apply hl;now right;left.
-             ++ simpl;rewrite eq_dec_eq.
-                reflexivity.
-        * assert (ih : gnl_decompose t' = inr (o, l)) by (apply IHl;intuition).
-          simpl;rewrite eq_dec_eq;repeat f_equal.
-          cut (gnl_term_to_list o a = [a] /\ gnl_term_to_list o t' = l);
-            [intros (->&->);reflexivity|split].
-          -- destruct a;simpl;auto.
-             destruct (o0 =?= o);simpl;auto.
-             subst.
-             exfalso.
-             cut (gnl_valid_elt o (t_prod o a1 a2) = false).
-             ++ apply Bool.not_false_iff_true.
-                apply hl;now left.
-             ++ simpl;rewrite eq_dec_eq.
-                reflexivity.
-          -- clear IHl hlen hlen';revert l hl E' ih;induction t';intros;simpl in *;[discriminate|].
-             rewrite eq_dec_eq in ih.
-             inversion ih.
-             rewrite eq_dec_eq.
-             reflexivity.
-      + destruct l as [|?[]];simpl;[left|right;left;eexists |right;right;split;[lia|]];eauto. 
-        destruct (GProd o l);simpl;eexists;eauto.
-  Qed.
-
-  
-  Lemma GProd_gnl_term_to_list_Some (s : GTerm A O) o :
-    exists t, GProd o (gnl_term_to_list o s) = Some t.
-  Proof.
-    case_eq (GProd o (gnl_term_to_list o s));[intros g E;exists g;reflexivity|intro F;exfalso].
-    destruct s as [|o'];simpl in F;try discriminate.
-    destruct (o' =?= o);simpl in F;try discriminate.
-    apply GProd_None,app_eq_nil in F as (F1&F2).
-    revert F1;apply gnl_term_to_list_not_nil.
-  Qed.
-  Lemma GProd_gnl_term_to_list_eq (s t : GTerm A O) o :
-    GProd o (gnl_term_to_list o s) = Some t -> Ø |- s =T= t.
-  Proof.
-    revert t;induction s as [|o'];simpl;intros s E.
-    - inversion E;reflexivity.
-    - destruct (o' =?= o).
-      + destruct (GProd_gnl_term_to_list_Some s1 o) as (s'1&Es1).
-        destruct (GProd_gnl_term_to_list_Some s2 o) as (s'2&Es2).
-        destruct (GProd_app Ø _ _ _ _ _ Es1 Es2) as (s'&E'&Es).
-        rewrite E in E';symmetry in E';inversion E';subst;clear E'.
-        rewrite Es.
-        rewrite IHs1,IHs2 by eassumption.
-        reflexivity.
-      + inversion E;reflexivity.
-  Qed.
-  
-  Lemma recompose_decompose (s : GTerm A O) :
-    exists t, gnl_recompose (gnl_decompose s) = Some t /\ Ø |- s =T= t.
-  Proof.
-    destruct s;simpl.
-    - eexists;split;reflexivity.
-    - rewrite eq_dec_eq.
-      revert s2;induction s1 as [|o'];intros s2.
-      + simpl.
-        destruct (GProd_gnl_term_to_list_Some s2 o) as (s&Es).
-        rewrite Es.
-        eexists;split;[reflexivity|].
-        apply gnlt_prod;[reflexivity|].
-        eapply GProd_gnl_term_to_list_eq;eassumption.
-      + simpl;destruct (o' =?= o).
-        * subst.
-          rewrite <- app_assoc.
-          replace (_ o s1_2 ++ _) with (gnl_term_to_list o (t_prod o s1_2 s2))
-            by now (simpl;rewrite eq_dec_eq).
-          setoid_rewrite <- gnlt_prod_assoc.
-          apply IHs1_1.
-        * simpl.
-          destruct (GProd_gnl_term_to_list_Some s2 o) as (s'2&Es'2).
-          rewrite Es'2.
-          eexists;split;[reflexivity|].
-          apply  GProd_gnl_term_to_list_eq in Es'2 as ->.
-          reflexivity.
-  Qed.
-
-  Global Instance gnl_valid_elt_proper rT o :
-    Proper (rT ==> eq) (gnl_valid_elt o) ->
-    Proper (gnl_term_theo_eq rT ==> eq) (gnl_valid_elt o).
-  Proof. intros hrT s t pr;induction pr;eauto. Qed.
-  Global Instance Ø_valid_elt_proper o :
-    Proper (Ø ==> eq) (gnl_valid_elt o).
-  Proof. intros s t []. Qed.
-
-  Global Instance gnl_valid_proper rT :
-    (forall o, Proper (rT ==> eq) (gnl_valid_elt o)) ->
-    Proper (gnl_decomp_eq rT ==> eq) gnl_valid.
-  Proof.
-    intros hrT [|(o&l)] [|(o'&m)] h;simpl in h;try tauto.
-    destruct h as (->&h);simpl.
-    apply Bool.eq_iff_eq_true.
-    repeat rewrite Bool.andb_true_iff,PeanoNat.Nat.ltb_lt,forallb_forall.
-    rewrite (list_lift_length _ l m h).
-    cut
-      ((forall x : GTerm A O, In x l -> gnl_valid_elt o' x = true) <->
-         forall x : GTerm A O, In x m -> gnl_valid_elt o' x = true);
-      [intros ->;reflexivity|].
-    repeat rewrite <- Forall_forall.
-    revert m h;induction l;intros [] h;try (exfalso;apply h).
-    - simpl;tauto.
-    - repeat rewrite Forall_cons_iff.
-      destruct h as (h1&h2).
-      rewrite h1.
-      apply IHl in h2 as ->.
-      reflexivity.
-  Qed.
+  (** The interpretation of [e]'s projections only contains valid decompositions. *)
   
   Lemma gnl_decomp_sat_valid (s : gnl_decomposition) e :
     gnl_decomp_sat Ø s e -> gnl_valid s = true.
@@ -1052,24 +1120,7 @@ Section gnl_decomp.
           apply get_op_eq in Eg;simpl in Eg;inversion Eg;subst;tauto. 
   Qed.
 
-  Lemma gnl_recompose_Some d : gnl_valid d = true -> exists t, gnl_recompose d = Some t.
-  Proof.
-    destruct d as [a|(o,l)];simpl.
-    - intros _;eexists;reflexivity.
-    - intros h;apply GProd_Some.
-      apply Bool.andb_true_iff in h as (h&_).
-      apply PeanoNat.Nat.ltb_lt in h.
-      intros ->;simpl in h;lia.
-  Qed.
-
-  Global Instance gnl_recompose_proper rT :
-    Proper (gnl_decomp_eq rT ==> or_none (gnl_term_theo_eq rT)) gnl_recompose.
-  Proof.
-    intros [a|(o,l)] [b|(o',m)];simpl;try tauto.
-    - intros ->;reflexivity.
-    - intros (<-&h).
-      rewrite h;reflexivity.
-  Qed.
+  (** ** Main theorem: semantic correspondance *)
   
   Theorem gnl_semantic_correspondance :
     forall s (e : gnl_exp),
@@ -1101,6 +1152,22 @@ Section gnl_decomp.
         rewrite E,<-h3;assumption.
   Qed.
 
+  (** * Clean projections *)
+
+  (** To apply the decompositions inductively, we need the projections to be built out of *)
+  (** _strictly smaller_ expressions for some ordering. The ordering we shall consider *)
+  (** (later on) will be based on [depth], a semantic notion. However, because of its *)
+  (** annihilation powers, [ø] may _hide_ subexpressions from the semantics, like in the *)
+  (** expression [ø ×{o} e], where [e] is a proper subexpression while not contributing to *)
+  (** the semantics. This means the projections defined above may feature in their support *)
+  (** expressions of larger depth, which is problematic. To circumvent this problem, we *)
+  (** apply the function [Clean] before and after projecting, to ensure we have _productive_ *)
+  (** expressions, whose every subexpression contribute to the semantics. *)
+
+  (** Thus we define a new notion of satisfaction between decompositions and expressions, *)
+  (** using _clean_ projections. Notice that we do not bother cleaning the [slat] projection, *)
+  (** as it is not meant to bear an inductive principle. *)
+
   Definition gnl_clean_decomp_sat r s e :=
     match s with
     | inl a => a |=slat= gnl_slat_proj e
@@ -1110,6 +1177,12 @@ Section gnl_decomp.
           /\ m |=( ka )= Clean (gnl_reg_proj o (Clean e))
     end.
 
+  (** ** Semantic correspondance *)
+  
+  (** We proceed to show that the semantic correspondance from the previous section still *)
+  (** holds. We begin by showing, first for [gnl_reg_trad], then for [gnl_reg_proj] that *)
+  (** cleaning does not change the semantics of the output. *)
+  
   Lemma gnl_reg_trad_Clean (r : relation (GTerm A O)) o e l :
     (exists m : Word (GExp A O),
       list_lift (gnl_theo_sat r) l (Word_to_list m) /\  m |=( ka )= gnl_reg_trad o (Clean e))
@@ -1118,7 +1191,30 @@ Section gnl_decomp.
   Proof.
     unfold Clean;revert l.
     induction e;simpl;try (now split; auto with proofs);intro l.
-    - destruct (clean_exp e1),(clean_exp e2);simpl;split;firstorder.
+    - transitivity(exists m : Word (GExp A O),
+                      list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                        (m |=( ka )= gnl_reg_trad o (Clean e1)
+                         \/ m |=( ka )= gnl_reg_trad o (Clean e2))).
+      + unfold Clean;destruct (clean_exp e1),(clean_exp e2);simpl;split;intros (m&hl&hsat);
+          try destruct hsat as [hsat|hsat];exists m;split;tauto||auto.
+      + unfold Clean;destruct (clean_exp e1) as [g1|],(clean_exp e2) as [g2|];simpl;split;
+          intros (m&hl&[hsat|hsat]);
+          try ((assert (h: exists m, list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                                       m |=( ka )= gnl_reg_trad o g1)
+                 by ((now exists m;split;[assumption|apply hsat])
+                     ||(apply IHe1||apply IHe2;exists m;split;[assumption|apply hsat])))
+               ||(assert (h:exists m, list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                                        m |=( ka )= gnl_reg_trad o g2)
+                   by ((now exists m;split;[assumption|apply hsat])
+                       ||(apply IHe1||apply IHe2;exists m;split;[assumption|apply hsat])))
+               || (assert (h:exists m, list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                                         m |=( ka )= ø)
+                    by ((now exists m;split;[assumption|apply hsat])
+                        ||(apply IHe1;exists m;split;[assumption|apply hsat])
+                        ||(apply IHe2;exists m;split;[assumption|apply hsat]))));
+               (destruct h as (m'&hl'&hsat');exists m';split;tauto)
+               ||(apply IHe1 in h||apply IHe2 in h;destruct h as (m'&hl'&hsat');
+                  exists m';split;tauto).
     - destruct (o0 =?= o).
       + subst;simpl.
         destruct (clean_exp e1),(clean_exp e2);simpl;try rewrite eq_dec_eq. 
@@ -1365,6 +1461,8 @@ Section gnl_decomp.
               eapply gnl_theo_sat_proper;[intros ? ? ? h;exfalso;apply h
                                          |reflexivity|apply C|apply hx1].
   Qed.
+
+  
   Lemma gnl_reg_proj_Clean r o e l :
     (exists m : Word (GExp A O),
         list_lift (gnl_theo_sat r) l (Word_to_list m) /\  m |=( ka )= gnl_reg_proj o (Clean e))
@@ -1373,7 +1471,30 @@ Section gnl_decomp.
   Proof.
     unfold Clean;revert l.
     induction e;simpl;try (now split; auto with proofs);intro l.
-    - destruct (clean_exp e1),(clean_exp e2);simpl;split;firstorder.
+    - transitivity(exists m : Word (GExp A O),
+                      list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                        (m |=( ka )= gnl_reg_proj o (Clean e1)
+                         \/ m |=( ka )= gnl_reg_proj o (Clean e2))).
+      + unfold Clean;destruct (clean_exp e1),(clean_exp e2);simpl;split;intros (m&hl&hsat);
+          try destruct hsat as [hsat|hsat];exists m;split;tauto||auto.
+      + unfold Clean;destruct (clean_exp e1) as [g1|],(clean_exp e2) as [g2|];simpl;split;
+          intros (m&hl&[hsat|hsat]);
+          try ((assert (h: exists m, list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                                       m |=( ka )= gnl_reg_proj o g1)
+                 by ((now exists m;split;[assumption|apply hsat])
+                     ||(apply IHe1||apply IHe2;exists m;split;[assumption|apply hsat])))
+               ||(assert (h:exists m, list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                                        m |=( ka )= gnl_reg_proj o g2)
+                   by ((now exists m;split;[assumption|apply hsat])
+                       ||(apply IHe1||apply IHe2;exists m;split;[assumption|apply hsat])))
+               || (assert (h:exists m, list_lift (gnl_theo_sat r) l (Word_to_list m) /\
+                                         m |=( ka )= ø)
+                    by ((now exists m;split;[assumption|apply hsat])
+                        ||(apply IHe1;exists m;split;[assumption|apply hsat])
+                        ||(apply IHe2;exists m;split;[assumption|apply hsat]))));
+          (destruct h as (m'&hl'&hsat');exists m';split;tauto)
+          ||(apply IHe1 in h||apply IHe2 in h;destruct h as (m'&hl'&hsat');
+             exists m';split;tauto).
     - destruct (o0 =?= o).
       + subst;simpl.
         pose proof (gnl_reg_trad_Clean r o e1) as he1;
@@ -1497,8 +1618,11 @@ Section gnl_decomp.
           apply IHe in ih as (m'&lift&sat).
           apply sat.
   Qed.
+
+  (** With this out of the way, we easily show that the new semantic relation bewteen *)
+  (** decompositions and expressions is equivalent to the old one. *)
   
-  Lemma gnl_clean_decomp_sat_id r s e :
+  Corollary gnl_clean_decomp_sat_id r s e :
     gnl_clean_decomp_sat r s e <-> gnl_decomp_sat r s e.
   Proof.
     destruct s as [|(o,l)];simpl;[tauto|].
@@ -1511,23 +1635,24 @@ Section gnl_decomp.
       split;auto.
   Qed.
 
+  (** We thus recover the semantic correspondance theorem. *)
+  
   Theorem gnl_clean_semantic_correspondance :
     forall s (e : gnl_exp),
       gnl_clean_decomp_sat Ø s e <-> exists t, gnl_decomp_eq Ø s (gnl_decompose t)
                                           /\ t |=(Ø)= e.
-  Proof.
-    setoid_rewrite gnl_clean_decomp_sat_id.
-    apply gnl_semantic_correspondance.
-  Qed.
+  Proof. setoid_rewrite gnl_clean_decomp_sat_id;apply gnl_semantic_correspondance. Qed.
 
+  (** ** Subexpressions and subterms *)
+  
   Definition sub_expr : relation (GExp A O) :=
     fun e f => exists o, In (Some e) (gnl_support (Clean (gnl_reg_proj o (Clean f)))).
 
-  Lemma sub_expr_implies_is_clean e f : sub_expr e f -> is_clean e = true.
+  Lemma sub_expr_implies_is_deep_clean e f : sub_expr e f -> is_deep_clean e = true.
   Proof.
     unfold sub_expr;intros (o&h).
     apply clean_incl_support in h.
-    cut (forall e f, In (Some e) (gnl_support (gnl_reg_trad o (Clean f))) -> is_clean e = true).
+    cut (forall e f, In (Some e) (gnl_support (gnl_reg_trad o (Clean f))) -> is_deep_clean e = true).
     - intros htrad;induction f;simpl in h.
       + tauto.
       + tauto.
@@ -1567,113 +1692,132 @@ Section gnl_decomp.
           inversion h';subst;clear h';simpl.
           rewrite D;reflexivity.
   Qed.
-  
-  Lemma KA_sat_gnl_sat_trad  (o : O) (l : list (GTerm A O)) m e :
-    m |=(ka)= gnl_reg_trad o e -> list_lift (gnl_theo_sat Ø) l (Word_to_list m) ->
-    exists s', GProd o l = Some s' /\ s' |=(Ø)= e.
-  Proof.
-    revert l m;induction e;simpl;try destruct (o0 =?= o).
-    - tauto.
-    - intros l m E h.
-      apply Word_to_list_eq in E;rewrite E in h.
-      destruct l as [|?[]];(exfalso;apply h)||destruct h as (h&_).
-      exists g;simpl;auto.
-    - intros l m [h1|h1] h2;
-        (eapply IHe1 in h1;[|eassumption])
-        ||(eapply IHe2 in h1;[|eassumption]);
-        destruct h1 as (s'&h1&h3);exists s';tauto.
-    - subst;intros l m (m1&m2&E&hm1&hm2) h2.
-      apply Word_to_list_eq in E;rewrite E in h2;simpl in h2.
-      apply list_lift_app in h2 as (l1&l2&->&hl1&hl2).
-      eapply IHe1 in hm1 as (s1&hm1&hs1);[|eassumption].
-      eapply IHe2 in hm2 as (s2&hm2&hs2);[|eassumption].
-      destruct (GProd_app Ø o l1 l2 s1 s2) as (s'&E1&E2);auto.
-      exists s';split;auto.
-      exists s1,s2;split;auto.
-    - intros l m E h.
-      apply Word_to_list_eq in E;rewrite E in h.
-       destruct l as [|?[]];(exfalso;apply h)||destruct h as (h&_).
-      exists g;split;auto.
-    - subst;intros l m (m1&L&h1&E&hL) h2.
-      apply Word_to_list_eq in E;rewrite E in h2;clear m E.
-      revert l m1 h1 h2 hL;induction L;[discriminate|].
-      destruct (L =?= []);[subst;clear IHL|apply (GProd_Some _ •) in n as (t&ht)];
-        simpl;intros;try rewrite ht in h1;inversion h1;clear h1;subst.
-      + destruct (IHe l m1) as (s'&hs'1&hs'2);auto.
-        exists s';split;auto.
-        exists s',[s'];repeat split;auto with proofs.
-        intros ? [<-|F];[|exfalso];auto.
-      + simpl in h2;apply list_lift_app in h2 as (l1&l2&->&hl1&hl2).
-        destruct (IHe l1 a) as (s1&es1&hs1);auto.
-        destruct (IHL l2 t) as (s2&es2&s'&L'&hs'&hs2&hL');auto.
-        destruct (GProd_app Ø _ _ _ _ _ es1 es2) as (T&hT1&hT2).
-        exists T;split;auto.
-        exists (s1 -[o]- s'),(s1::L');simpl;rewrite hs';repeat split;auto.
-        * rewrite hT2,hs2;reflexivity.
-        * intros ? [<-|h];[|apply hL'];auto.
-    - intros l m [hm| E] hl.
-      + eapply IHe in hm;eauto.
-        destruct hm as (s'&Es'&hs').
-        exists s';split;auto.
-        exists s',[s'];repeat split;auto with proofs.
-        intros ? [<-|F];[apply hs'|exfalso;apply F].
-      + apply Word_to_list_eq in E;rewrite E in hl.
-        destruct l as [|?[]];(exfalso;apply hl)||destruct hl as (h&_).
-        exists g;split;auto.
-        destruct h as (t1&t'&E1&ht1&t2&L&E2&E3&hL).
-        setoid_rewrite E1;setoid_rewrite E3.
-        exists (t_prod o0 t1 t2),(t1::L);simpl;rewrite E2;repeat split;auto with proofs.
-        intros ? [<-|F];[apply ht1|apply hL,F].
-  Qed.
-  
-  Lemma KA_sat_gnl_sat_proj  (o : O) (l : list (GTerm A O)) m e :
-    m |=(ka)= gnl_reg_proj o e -> list_lift (gnl_theo_sat Ø) l (Word_to_list m) ->
-    exists s', GProd o l = Some s' /\ s' |=(Ø)= e.
-  Proof.
-    revert l m ;induction e;simpl;try destruct (o0 =?= o);subst;try tauto.
-    - intros l m h1 h2;try destruct h1 as [h1|h1];
-        (eapply IHe1 in h1;[|eassumption])
-        ||(eapply IHe2 in h1;[|eassumption]);
-        destruct h1 as (s'&h1&h3);exists s';tauto.
-    - intros l m h1 h2.
-      destruct h1 as (m1&m2&E&hm1&hm2).
-      apply Word_to_list_eq in E;rewrite E in h2;simpl in h2.
-      apply list_lift_app in h2 as (l1&l2&->&hl1&hl2).
-      destruct (KA_sat_gnl_sat_trad o l1 m1 e1) as (s1&E1&hs1);auto.
-      destruct (KA_sat_gnl_sat_trad o l2 m2 e2) as (s2&E2&hs2);auto.
-      destruct (GProd_app Ø o l1 l2 s1 s2) as (s'&E3&E4);auto.
-      exists s';split;auto.
-      subst;exists s1,s2;repeat split;auto with proofs.
-    - subst;simpl;intros l m hm hl;
-        try destruct hm as [hm|hm];
-        try (eapply IHe in hm as (s'&hm&hs');[|reflexivity|eassumption];
-             exists s';split;auto;
-             exists s',[s'];simpl;repeat split;auto with proofs;
-             intros ? [<-|F];[apply hs'|exfalso;apply F]);
-        try destruct hm as (m1&m'&->&hm1&m2&m3&->&hm2&L&->&hL);
-        try apply list_lift_app in hl as (l1&l'&->&hl1&hl2);
-        try apply list_lift_app in hl2 as (l2&l3&->&hl2&hl3).
-      tauto.
-    - intros l m h1 h2.
-      destruct h1 as [h1|h1].
-      + eapply IHe in h1 as (s&h1&h3);[|eassumption].
-        exists s;split;auto.
-        exists s,[s];repeat split;auto with proofs.
-        intros ? [<-|F];[assumption|exfalso;apply F].
-      + cut (m |=(ka)= gnl_reg_trad o (e^{o}));[clear h1;intro h1|].
-        * eapply KA_sat_gnl_sat_trad in h1 as (s'&h3&s''&L&h4&h5&h6);[|apply h2].
-          exists s';split;auto.
-          exists s'',L;repeat split;auto.
-        * simpl;rewrite eq_dec_eq.
-          destruct h1 as (m1&?&E1&h1&m2&L&E2&h3&h4).
-          exists (m1**m2),(m1::L);simpl;rewrite E2;repeat split;eauto with proofs.
-          intros ? [<-|h];[|apply h4];auto.
-    - intros l m  hm hl.
-      destruct (IHe l m hm hl) as (s'&hl'&hs').
-      exists s';split;auto.
-      exists s',[s'];repeat split;auto with proofs.
-      intros ? [<-|F];[assumption|exfalso;apply F].
-  Qed.
 
-  
+  Definition sub_term (s t : GTerm A O) :=
+    match gnl_decompose t with
+    | inl _ => False
+    | inr (_,l) => In s l
+    end.
+
+  (* Lemma sub_expr_sat e f : *)
+  (*   sub_expr e f -> exists s t, s |=(Ø)= e /\ sub_term s t /\ t |=(Ø)= f. *)
+  (* Proof. *)
+  (*   intro hyp. *)
+  (*   pose proof hyp as V;apply sub_expr_implies_is_deep_clean in V. *)
+  (*   destruct (deep_clean_sat e V) as (t&ht). *)
+  (*   destruct hyp as (o&h). *)
+  (*   apply clean_support_sat_iff in h as (s&hsat&hIn);[|apply Clean_is_clean]. *)
+  (*   rewrite Clean_is_eq in hsat. *)
+  (*   cut(exists l, list_lift (gnl_theo_sat Ø) l (Word_to_list s) /\ In t l). *)
+  (*     intro h;ax *)
+  (*   intros (o&h). *)
+  (* Qed. *)
 End gnl_decomp.
+
+  (* (** *) *)
+  (* Lemma KA_sat_gnl_sat_trad  (o : O) (l : list (GTerm A O)) m e : *)
+  (*   m |=(ka)= gnl_reg_trad o e -> list_lift (gnl_theo_sat Ø) l (Word_to_list m) -> *)
+  (*   exists s', GProd o l = Some s' /\ s' |=(Ø)= e. *)
+  (* Proof. *)
+  (*   revert l m;induction e;simpl;try destruct (o0 =?= o). *)
+  (*   - tauto. *)
+  (*   - intros l m E h. *)
+  (*     apply Word_to_list_eq in E;rewrite E in h. *)
+  (*     destruct l as [|?[]];(exfalso;apply h)||destruct h as (h&_). *)
+  (*     exists g;simpl;auto. *)
+  (*   - intros l m [h1|h1] h2; *)
+  (*       (eapply IHe1 in h1;[|eassumption]) *)
+  (*       ||(eapply IHe2 in h1;[|eassumption]); *)
+  (*       destruct h1 as (s'&h1&h3);exists s';tauto. *)
+  (*   - subst;intros l m (m1&m2&E&hm1&hm2) h2. *)
+  (*     apply Word_to_list_eq in E;rewrite E in h2;simpl in h2. *)
+  (*     apply list_lift_app in h2 as (l1&l2&->&hl1&hl2). *)
+  (*     eapply IHe1 in hm1 as (s1&hm1&hs1);[|eassumption]. *)
+  (*     eapply IHe2 in hm2 as (s2&hm2&hs2);[|eassumption]. *)
+  (*     destruct (GProd_app Ø o l1 l2 s1 s2) as (s'&E1&E2);auto. *)
+  (*     exists s';split;auto. *)
+  (*     exists s1,s2;split;auto. *)
+  (*   - intros l m E h. *)
+  (*     apply Word_to_list_eq in E;rewrite E in h. *)
+  (*      destruct l as [|?[]];(exfalso;apply h)||destruct h as (h&_). *)
+  (*     exists g;split;auto. *)
+  (*   - subst;intros l m (m1&L&h1&E&hL) h2. *)
+  (*     apply Word_to_list_eq in E;rewrite E in h2;clear m E. *)
+  (*     revert l m1 h1 h2 hL;induction L;[discriminate|]. *)
+  (*     destruct (L =?= []);[subst;clear IHL|apply (GProd_Some _ •) in n as (t&ht)]; *)
+  (*       simpl;intros;try rewrite ht in h1;inversion h1;clear h1;subst. *)
+  (*     + destruct (IHe l m1) as (s'&hs'1&hs'2);auto. *)
+  (*       exists s';split;auto. *)
+  (*       exists s',[s'];repeat split;auto with proofs. *)
+  (*       intros ? [<-|F];[|exfalso];auto. *)
+  (*     + simpl in h2;apply list_lift_app in h2 as (l1&l2&->&hl1&hl2). *)
+  (*       destruct (IHe l1 a) as (s1&es1&hs1);auto. *)
+  (*       destruct (IHL l2 t) as (s2&es2&s'&L'&hs'&hs2&hL');auto. *)
+  (*       destruct (GProd_app Ø _ _ _ _ _ es1 es2) as (T&hT1&hT2). *)
+  (*       exists T;split;auto. *)
+  (*       exists (s1 -[o]- s'),(s1::L');simpl;rewrite hs';repeat split;auto. *)
+  (*       * rewrite hT2,hs2;reflexivity. *)
+  (*       * intros ? [<-|h];[|apply hL'];auto. *)
+  (*   - intros l m [hm| E] hl. *)
+  (*     + eapply IHe in hm;eauto. *)
+  (*       destruct hm as (s'&Es'&hs'). *)
+  (*       exists s';split;auto. *)
+  (*       exists s',[s'];repeat split;auto with proofs. *)
+  (*       intros ? [<-|F];[apply hs'|exfalso;apply F]. *)
+  (*     + apply Word_to_list_eq in E;rewrite E in hl. *)
+  (*       destruct l as [|?[]];(exfalso;apply hl)||destruct hl as (h&_). *)
+  (*       exists g;split;auto. *)
+  (*       destruct h as (t1&t'&E1&ht1&t2&L&E2&E3&hL). *)
+  (*       setoid_rewrite E1;setoid_rewrite E3. *)
+  (*       exists (t_prod o0 t1 t2),(t1::L);simpl;rewrite E2;repeat split;auto with proofs. *)
+  (*       intros ? [<-|F];[apply ht1|apply hL,F]. *)
+  (* Qed. *)
+  
+  (* Lemma KA_sat_gnl_sat_proj  (o : O) (l : list (GTerm A O)) m e : *)
+  (*   m |=(ka)= gnl_reg_proj o e -> list_lift (gnl_theo_sat Ø) l (Word_to_list m) -> *)
+  (*   exists s', GProd o l = Some s' /\ s' |=(Ø)= e. *)
+  (* Proof. *)
+  (*   revert l m ;induction e;simpl;try destruct (o0 =?= o);subst;try tauto. *)
+  (*   - intros l m h1 h2;try destruct h1 as [h1|h1]; *)
+  (*       (eapply IHe1 in h1;[|eassumption]) *)
+  (*       ||(eapply IHe2 in h1;[|eassumption]); *)
+  (*       destruct h1 as (s'&h1&h3);exists s';tauto. *)
+  (*   - intros l m h1 h2. *)
+  (*     destruct h1 as (m1&m2&E&hm1&hm2). *)
+  (*     apply Word_to_list_eq in E;rewrite E in h2;simpl in h2. *)
+  (*     apply list_lift_app in h2 as (l1&l2&->&hl1&hl2). *)
+  (*     destruct (KA_sat_gnl_sat_trad o l1 m1 e1) as (s1&E1&hs1);auto. *)
+  (*     destruct (KA_sat_gnl_sat_trad o l2 m2 e2) as (s2&E2&hs2);auto. *)
+  (*     destruct (GProd_app Ø o l1 l2 s1 s2) as (s'&E3&E4);auto. *)
+  (*     exists s';split;auto. *)
+  (*     subst;exists s1,s2;repeat split;auto with proofs. *)
+  (*   - subst;simpl;intros l m hm hl; *)
+  (*       try destruct hm as [hm|hm]; *)
+  (*       try (eapply IHe in hm as (s'&hm&hs');[|reflexivity|eassumption]; *)
+  (*            exists s';split;auto; *)
+  (*            exists s',[s'];simpl;repeat split;auto with proofs; *)
+  (*            intros ? [<-|F];[apply hs'|exfalso;apply F]); *)
+  (*       try destruct hm as (m1&m'&->&hm1&m2&m3&->&hm2&L&->&hL); *)
+  (*       try apply list_lift_app in hl as (l1&l'&->&hl1&hl2); *)
+  (*       try apply list_lift_app in hl2 as (l2&l3&->&hl2&hl3). *)
+  (*     tauto. *)
+  (*   - intros l m h1 h2. *)
+  (*     destruct h1 as [h1|h1]. *)
+  (*     + eapply IHe in h1 as (s&h1&h3);[|eassumption]. *)
+  (*       exists s;split;auto. *)
+  (*       exists s,[s];repeat split;auto with proofs. *)
+  (*       intros ? [<-|F];[assumption|exfalso;apply F]. *)
+  (*     + cut (m |=(ka)= gnl_reg_trad o (e^{o}));[clear h1;intro h1|]. *)
+  (*       * eapply KA_sat_gnl_sat_trad in h1 as (s'&h3&s''&L&h4&h5&h6);[|apply h2]. *)
+  (*         exists s';split;auto. *)
+  (*         exists s'',L;repeat split;auto. *)
+  (*       * simpl;rewrite eq_dec_eq. *)
+  (*         destruct h1 as (m1&?&E1&h1&m2&L&E2&h3&h4). *)
+  (*         exists (m1**m2),(m1::L);simpl;rewrite E2;repeat split;eauto with proofs. *)
+  (*         intros ? [<-|h];[|apply h4];auto. *)
+  (*   - intros l m  hm hl. *)
+  (*     destruct (IHe l m hm hl) as (s'&hl'&hs'). *)
+  (*     exists s';split;auto. *)
+  (*     exists s',[s'];repeat split;auto with proofs. *)
+  (*     intros ? [<-|F];[assumption|exfalso;apply F]. *)
+  (* Qed. *)
