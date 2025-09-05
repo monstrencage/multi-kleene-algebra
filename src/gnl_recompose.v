@@ -1,9 +1,22 @@
+(** * gnl_alg.gnl_recompose : recomposition of expressions and axiomatic correspondance *)
 Require Import prelim.
 Require Import gnl theories gnl_decomp.
 
 Section gnl_recomp.
   Context {A : Set} {decA : decidable_set A}.
   Context {O : Set} {decO : decidable_set O}.
+
+  (** * Definitions *)
+
+  (** The axiomatic order on projections is defined as follows: *)
+
+  Definition dec_inf r : relation (GExp A O) :=
+    fun e f =>
+      gnl_slat_proj e ≤slat gnl_slat_proj f
+      /\ forall o, fKA r |- gnl_reg_proj o e ≤ gnl_reg_proj o f.
+
+  (** The [operators] of an expressions are those [o] that feature in subexpressions *)
+  (** either as [_×{o}_] or as [_^{o}]. *)
 
   Fixpoint operators (e : GExp A O) : list O :=
     match e with
@@ -12,6 +25,51 @@ Section gnl_recomp.
     | e ×{o} f => o::operators e ++ operators f
     | e ^{o} => o::operators e
     end.
+
+  (** The following pair of functions allows for the projections to be converted back *)
+  (** to [GExp A O]. *)
+  
+  Fixpoint slat_to_gnl (s : slat A) : GExp A O :=
+    match s with
+    | ø => ø
+    | var a => var a
+    | e + f => slat_to_gnl e + slat_to_gnl f
+    | _ => ø
+    end.
+  
+  Fixpoint flatten {X Op : Set} (o : Op) (e : Reg (GExp X Op)) : GExp X Op :=
+    match e with
+    | 1_r | ø => ø
+    | var (Some e) => e
+    | e @@ f =>
+        (if ewp_r e then flatten o f else ø)
+          + ((if ewp_r f then flatten o e else ø) + (flatten o e ×{o} flatten o f))
+    | e + f => flatten o e + flatten o f
+    | e^+ => iter o (flatten o e)
+    end.
+
+  (** We may thus define the recomposition function that computes a new expression from *)
+  (** an expression's projections. *)
+  Definition gnl_recompose e :=
+    slat_to_gnl (gnl_slat_proj e) +
+      fold_right sum ø (map (fun o => flatten o (gnl_reg_proj o e)) (operators e)).
+
+  (** * First lemmas *)
+
+  (** [gnl_reg_trad] is non-destructive, since we can get back from it an expression *)
+  (** that is equivalent to the original argument. *)
+  
+  Lemma flatten_gnl_reg_trad {X Op : Set} {decOp : decidable_set Op} :
+    forall (o : Op) (e : GExp X Op), Ø |- e == flatten o (gnl_reg_trad o e).
+  Proof.
+    induction e as [ | | |i|i];simpl;auto;try destruct (i =?= o);subst;simpl;
+      repeat rewrite ewp_gnl_reg_trad;
+      try (rewrite <-IHe1,<-IHe2)||(rewrite <-IHe);simpl;
+      try (eexists;split;[reflexivity|]);try reflexivity||auto with proofs.
+    - repeat rewrite gnl_theo_eq_sum_zero_e;reflexivity. 
+    - split;eauto with proofs.
+  Qed.
+  (** Any operator not in [operators e] will have an empty projection. *)
 
   Lemma not_operator_zero o e :
     ~ In o (operators e) -> Ø |- gnl_reg_proj o e == ø.
@@ -24,132 +82,8 @@ Section gnl_recomp.
       intro;apply IHe;tauto.
   Qed.
   
-  Definition gnl_recompose e :=
-    slat_to_gnl (gnl_slat_proj e) +
-      fold_right sum ø (map (fun o => flatten o (gnl_reg_proj o e)) (operators e)).
-
-  Theorem gnl_recompose_id e :
-    Ø |- gnl_recompose e == e.
-  Proof.
-    unfold gnl_recompose.
-    cut (forall L, incl (operators e) L ->
-                   Ø |- slat_to_gnl (gnl_slat_proj e) +
-                          fold_right sum ø (map (fun o : O => flatten o (gnl_reg_proj o e)) L) == e);
-      [intros hyp;apply hyp;intro;tauto|].
-    assert (ltr : forall e L,
-               incl (operators e) L ->
-               Ø
-               |- slat_to_gnl (gnl_slat_proj e) +
-                    fold_right sum ø (map (fun o : O => flatten o (gnl_reg_proj o e)) L) ≤ e);
-      [clear e;intros e L hL|split;[auto|]];unfold gnl_recompose in *.
-    - clear hL;apply gnl_theo_inf_join.
-      + induction e;simpl;auto with proofs.
-        rewrite IHe,<- gnl_theo_inf_iter_unfold_left.
-        auto with proofs.
-      + induction L as [|o];[auto with proofs|].
-        simpl;apply gnl_theo_inf_join;auto.
-        clear IHL;induction e;simpl;auto with proofs.
-        * destruct (o0 =?= o);simpl;auto with proofs.
-          subst;repeat rewrite ewp_gnl_reg_trad.
-          repeat rewrite <- flatten_gnl_reg_trad.
-          repeat apply gnl_theo_inf_join;auto with proofs.
-        * destruct (o0 =?= o);simpl;auto with proofs.
-          -- subst;simpl;repeat (rewrite ewp_gnl_reg_trad;simpl).
-             unfold ewp_r;simpl.
-             rewrite Bool.andb_true_r.
-             replace (ka.r_ewp (Reg_to_reg (gnl_reg_trad o e))) with (ewp_r (gnl_reg_trad o e))
-               by reflexivity.
-             rewrite (ewp_gnl_reg_trad o e).
-             repeat rewrite <- flatten_gnl_reg_trad.
-             rewrite IHe.
-             repeat apply gnl_theo_inf_join;auto with proofs.
-             ++ rewrite <- gnl_theo_inf_iter_unfold_left;auto with proofs.
-             ++ rewrite <- gnl_theo_inf_iter_unfold_left at 2;auto with proofs.
-          -- rewrite IHe;rewrite <- gnl_theo_inf_iter_unfold_left;auto with proofs.
-    - revert L H;induction e;simpl;intros;auto with proofs.
-      + rewrite (IHe1 L),(IHe2 L) at 1 by (intros ? h;apply H,in_app_iff;auto).
-        clear H IHe1 IHe2.
-        repeat apply gnl_theo_inf_join.
-        * apply gnl_theo_inf_sum_left;auto with proofs.
-        * apply gnl_theo_inf_sum_right.
-          induction L;[reflexivity|];simpl.
-          apply sum_mono;auto with proofs.
-        * apply gnl_theo_inf_sum_left;auto with proofs.
-        * apply gnl_theo_inf_sum_right.
-          induction L;[reflexivity|];simpl.
-          apply sum_mono;auto with proofs.
-      + apply gnl_theo_inf_sum_right.
-        cut (In o L);[|apply H;now left].
-        clear H IHe1 IHe2.
-        induction L;[simpl;tauto|].
-        intros [<-|ih].
-        * apply gnl_theo_inf_sum_left.
-          rewrite eq_dec_eq;simpl.
-          repeat rewrite ewp_gnl_reg_trad.
-          repeat rewrite <- flatten_gnl_reg_trad.
-          apply gnl_theo_inf_sum_right;auto with proofs.
-        * rewrite IHL by assumption;simpl;auto with proofs.
-      + assert (ih : incl (operators e) L) by (intros ? ?;apply H;now right).
-        apply IHe in ih.
-        remember (slat_to_gnl (gnl_slat_proj e) +
-                    fold_right sum ø
-                      (map
-                         (fun o0 : O =>
-                            flatten o0
-                              (if o =?= o0
-                               then gnl_reg_proj o0 e + gnl_reg_trad o0 e @@ (gnl_reg_trad o0 e) ^+
-                               else gnl_reg_proj o0 e)) L))
-                   as E.
-        cut (Ø |- e ≤ E).
-        * intros h.
-          rewrite gnl_theo_eq_iter_unfold_left.
-          apply gnl_theo_inf_join;auto.
-          rewrite h at 1.
-          apply gnl_theo_inf_iter_right_ind.
-          rewrite h.
-          rewrite HeqE at 3;apply gnl_theo_inf_sum_right.
-          transitivity (flatten o (gnl_reg_proj o e + gnl_reg_trad o e @@ (gnl_reg_trad o e) ^+)).
-          -- simpl.
-             repeat rewrite ewp_gnl_reg_trad.
-                unfold ewp_r;simpl.
-                rewrite Bool.andb_true_r.
-                replace (ka.r_ewp (Reg_to_reg (gnl_reg_trad o e))) with (ewp_r (gnl_reg_trad o e))
-                  by reflexivity.
-                rewrite ewp_gnl_reg_trad.
-                repeat rewrite <- flatten_gnl_reg_trad.
-                repeat apply gnl_theo_inf_sum_right.
-                pose proof (ltr (e ^{o}) L H) as h2;simpl in h2;rewrite <- HeqE in h2.
-                rewrite h2;clear.
-                rewrite gnl_theo_eq_iter_unfold_left at 1.
-                rewrite gnl_theo_eq_sum_prod,<-gnl_theo_eq_prod_assoc.
-                apply gnl_theo_inf_join;auto with proofs.
-                apply prod_mono;auto with proofs.
-                apply gnl_theo_inf_iter_left_ind.
-                rewrite gnl_theo_eq_iter_unfold_left at 2;auto with proofs.
-          -- cut (In o L);[|apply H;now left].
-             clear.
-             induction L as [|o'];[simpl;tauto|].
-             intros [<-|ih].
-             ++ apply gnl_theo_inf_sum_left.
-                rewrite eq_dec_eq;simpl.
-                repeat rewrite ewp_gnl_reg_trad.
-                unfold ewp_r;simpl.
-                rewrite Bool.andb_true_r.
-                replace (ka.r_ewp (Reg_to_reg (gnl_reg_trad o' e))) with (ewp_r (gnl_reg_trad o' e))
-                  by reflexivity.
-                rewrite ewp_gnl_reg_trad.
-                reflexivity.
-             ++ rewrite IHL by assumption;simpl;auto with proofs.
-        * rewrite ih,HeqE.
-          apply sum_mono;auto with proofs.
-          clear;induction L as [|o'];simpl;[|destruct (o =?= o');subst;rewrite IHL;simpl];
-            auto with proofs.
-  Qed.
-
-  Definition dec_inf r : relation (GExp A O) :=
-    fun e f =>
-      gnl_slat_proj e ≤slat gnl_slat_proj f
-      /\ forall o, fKA r |- gnl_reg_proj o e ≤ gnl_reg_proj o f.
+  (** The ordering we defined on projections is sound w.r.t. the satisfaction relation *)
+  (** bewteen decompostions and projected expressions. *)
 
   Global Instance dec_inf_sound s :
     Proper (dec_inf Ø ==> Basics.impl) (gnl_decomp_sat Ø s).
@@ -318,6 +252,152 @@ Section gnl_recomp.
           -- exists (t_var (Some f));repeat split;auto with proofs.
   Qed.          
 
+  (** * First theorem: the recomposion of an expression is equivalent to the original *)
+
+  (** We first prove the _easy_ direction, which hinges on the fact that each projection *)
+  (** is below the orgininal expression. *)
+  
+  Lemma gnl_slat_proj_inf e : Ø |- slat_to_gnl (gnl_slat_proj e) ≤ e.
+  Proof.
+    induction e;simpl;auto with proofs.
+    rewrite IHe,<- gnl_theo_inf_iter_unfold_left.
+    auto with proofs.
+  Qed. 
+
+  Lemma gnl_reg_proj_inf o (e : GExp A O): Ø |- flatten o (gnl_reg_proj o e) ≤ e.
+  Proof.
+    induction e;simpl;auto with proofs.
+    - destruct (o0 =?= o);simpl;auto with proofs.
+      subst;repeat rewrite ewp_gnl_reg_trad.
+      repeat rewrite <- flatten_gnl_reg_trad.
+      repeat apply gnl_theo_inf_join;auto with proofs.
+    - destruct (o0 =?= o);simpl;auto with proofs.
+      + subst;simpl;repeat (rewrite ewp_gnl_reg_trad;simpl).
+        unfold ewp_r;simpl.
+        rewrite Bool.andb_true_r.
+        replace (ka.r_ewp (Reg_to_reg (gnl_reg_trad o e))) with (ewp_r (gnl_reg_trad o e))
+          by reflexivity.
+        rewrite (ewp_gnl_reg_trad o e).
+        repeat rewrite <- flatten_gnl_reg_trad.
+        rewrite IHe.
+        repeat apply gnl_theo_inf_join;auto with proofs.
+        * rewrite <- gnl_theo_inf_iter_unfold_left;auto with proofs.
+        * rewrite <- gnl_theo_inf_iter_unfold_left at 2;auto with proofs.
+      + rewrite IHe;rewrite <- gnl_theo_inf_iter_unfold_left;auto with proofs.
+  Qed.
+
+  Lemma gnl_recompose_inf_aux e L : 
+    Ø |- slat_to_gnl (gnl_slat_proj e) + 
+         fold_right sum ø (map (fun o : O => flatten o (gnl_reg_proj o e)) L) ≤ e.
+  Proof.
+    apply gnl_theo_inf_join.
+    - apply gnl_slat_proj_inf.
+    - induction L as [|o];[auto with proofs|].
+      simpl;apply gnl_theo_inf_join;auto.
+      apply gnl_reg_proj_inf.
+  Qed.
+
+  Corollary gnl_recompose_inf e : Ø |- gnl_recompose e ≤ e.
+  Proof. apply gnl_recompose_inf_aux. Qed.
+
+  (** For the converse inclusion, we need to generalise the list [operators e] to any *)
+  (** _larger_ list. *)
+
+  Lemma gnl_recompose_sup_aux e L : 
+    incl (operators e) L ->
+    Ø |- e ≤ slat_to_gnl (gnl_slat_proj e) +
+              fold_right sum ø (map (fun o : O => flatten o (gnl_reg_proj o e)) L).
+  Proof.
+    revert L;induction e;simpl;intros;auto with proofs.
+    - rewrite (IHe1 L),(IHe2 L) at 1 by (intros ? h;apply H,in_app_iff;auto).
+      clear H IHe1 IHe2.
+      repeat apply gnl_theo_inf_join.
+      + apply gnl_theo_inf_sum_left;auto with proofs.
+      + apply gnl_theo_inf_sum_right.
+        induction L;[reflexivity|];simpl.
+        apply sum_mono;auto with proofs.
+      + apply gnl_theo_inf_sum_left;auto with proofs.
+      + apply gnl_theo_inf_sum_right.
+        induction L;[reflexivity|];simpl.
+        apply sum_mono;auto with proofs.
+    - apply gnl_theo_inf_sum_right.
+      cut (In o L);[|apply H;now left].
+      clear H IHe1 IHe2.
+      induction L;[simpl;tauto|].
+      intros [<-|ih].
+      + apply gnl_theo_inf_sum_left.
+        rewrite eq_dec_eq;simpl.
+        repeat rewrite ewp_gnl_reg_trad.
+        repeat rewrite <- flatten_gnl_reg_trad.
+        apply gnl_theo_inf_sum_right;auto with proofs.
+      + rewrite IHL by assumption;simpl;auto with proofs.
+    - assert (ih : incl (operators e) L) by (intros ? ?;apply H;now right).
+      apply IHe in ih.
+      remember (slat_to_gnl (gnl_slat_proj e) +
+                  fold_right sum ø
+                    (map
+                        (fun o0 : O =>
+                          flatten o0
+                            (if o =?= o0
+                              then gnl_reg_proj o0 e + gnl_reg_trad o0 e @@ (gnl_reg_trad o0 e) ^+
+                              else gnl_reg_proj o0 e)) L))
+                  as E.
+      cut (Ø |- e ≤ E).
+      + intros h.
+        rewrite gnl_theo_eq_iter_unfold_left.
+        apply gnl_theo_inf_join;auto.
+        rewrite h at 1.
+        apply gnl_theo_inf_iter_right_ind.
+        rewrite h.
+        rewrite HeqE at 3;apply gnl_theo_inf_sum_right.
+        transitivity (flatten o (gnl_reg_proj o e + gnl_reg_trad o e @@ (gnl_reg_trad o e) ^+)).
+        * simpl.
+          repeat rewrite ewp_gnl_reg_trad.
+          unfold ewp_r;simpl.
+          rewrite Bool.andb_true_r.
+          replace (ka.r_ewp (Reg_to_reg (gnl_reg_trad o e))) with (ewp_r (gnl_reg_trad o e))
+            by reflexivity.
+          rewrite ewp_gnl_reg_trad.
+          repeat rewrite <- flatten_gnl_reg_trad.
+          repeat apply gnl_theo_inf_sum_right.
+          pose proof (gnl_recompose_inf_aux (e ^{o}) L) as h2;simpl in h2;rewrite <- HeqE in h2.
+          rewrite h2;clear.
+          rewrite gnl_theo_eq_iter_unfold_left at 1.
+          rewrite gnl_theo_eq_sum_prod,<-gnl_theo_eq_prod_assoc.
+          apply gnl_theo_inf_join;auto with proofs.
+          apply prod_mono;auto with proofs.
+          apply gnl_theo_inf_iter_left_ind.
+          rewrite gnl_theo_eq_iter_unfold_left at 2;auto with proofs.
+        * cut (In o L);[|apply H;now left].
+          clear.
+          induction L as [|o'];[simpl;tauto|].
+          intros [<-|ih].
+          -- apply gnl_theo_inf_sum_left.
+             rewrite eq_dec_eq;simpl.
+             repeat rewrite ewp_gnl_reg_trad.
+             unfold ewp_r;simpl.
+             rewrite Bool.andb_true_r.
+             replace (ka.r_ewp (Reg_to_reg (gnl_reg_trad o' e))) with (ewp_r (gnl_reg_trad o' e))
+               by reflexivity.
+             rewrite ewp_gnl_reg_trad.
+             reflexivity.
+          -- rewrite IHL by assumption;simpl;auto with proofs.
+      + rewrite ih,HeqE.
+        apply sum_mono;auto with proofs.
+        clear;induction L as [|o'];simpl;[|destruct (o =?= o');subst;rewrite IHL;simpl];
+          auto with proofs.
+  Qed.
+
+
+  Corollary gnl_recompose_sup e : Ø |- e ≤ gnl_recompose e.
+  Proof. apply gnl_recompose_sup_aux;intro;tauto. Qed.
+
+  (** We now prove the full theorem. *)
+
+  Theorem gnl_recompose_id e : Ø |- gnl_recompose e == e.
+  Proof. split;[apply gnl_recompose_inf|apply gnl_recompose_sup]. Qed.
+
+  (** * A result about the empty word property *)
   Lemma fKA_ewp_r {X Op} (r : relation (GExp X Op))  e1 e2 :
     fKA r |- e1 ≤ e2 -> implb (ewp_r e1) (ewp_r e2) = true.
   Proof.
@@ -332,6 +412,10 @@ Section gnl_recomp.
                       || (rewrite Bool.orb_true_iff in * );try tauto.
   Qed.
 
+  (** * Testing whether an expression is empty *)
+  (** We can use the following boolean predicate to check whether an expression is equivalent to *)
+  (** [ø], i.e. it has an empty interpretation. *)
+
   Fixpoint is_zero {X Op:Set} (e : GExp X Op) :=
     match e with
     | ø => true
@@ -341,7 +425,10 @@ Section gnl_recomp.
     | e ^{_} => is_zero e
     end.
 
-  Lemma is_zero_eq {X Op:Set} (e f : GExp X Op) :
+  (** To prove the correction of this predicate, we first observe that it send the relation  *)
+  (** [Ø|- _ ≤ _] to the boolean implication. *)
+
+  Lemma is_zero_implb {X Op:Set} (e f : GExp X Op) :
     Ø |- e ≤ f -> implb (is_zero f) (is_zero e) = true.
   Proof.
     rewrite Bool.implb_true_iff;intro E;induction E;try destruct H;
@@ -351,6 +438,8 @@ Section gnl_recomp.
       || (rewrite Bool.andb_true_iff in * )
       || (rewrite Bool.orb_true_iff in * );try tauto.
   Qed.
+
+  (** We then prove that when the predicate holds, the argument is provably empty. *)
 
   Lemma is_zero_inf {X Op:Set} (e : GExp X Op) : is_zero e = true -> Ø |- e ≤ ø.
   Proof.
@@ -363,11 +452,16 @@ Section gnl_recomp.
     - intros [h|h];[rewrite IHe1|rewrite IHe2];auto with proofs.
   Qed.
 
+  (** Putting both previous lemmas together, we get that [is_zero] does characterise provably *)
+  (** empty expressions. *)
+
   Lemma is_zero_spec {X Op: Set} (e : GExp X Op) : is_zero e = true <-> Ø |- e ≤ ø.
   Proof.
     split;[apply is_zero_inf|].
-    now intro h;apply is_zero_eq in h;simpl in h.
+    now intro h;apply is_zero_implb in h;simpl in h.
   Qed.
+
+  (** Being empty implies not having the empty word property. *)
 
   Lemma is_zero_ewp {X: Set} (e : Reg X) : is_zero e = true -> ewp_r e = false.
   Proof.
@@ -381,7 +475,10 @@ Section gnl_recomp.
     - intros h;rewrite IHe;auto.
   Qed.
 
-  Lemma is_zero_clean_exp_None {X Op: Set} (e : GExp X Op) : is_zero e = true <-> clean_exp e = None.
+  (** [is_zero] also characterizes expressions whose [clean_exp] is undefined. *)
+
+  Lemma is_zero_clean_exp_None {X Op: Set} (e : GExp X Op) : 
+    is_zero e = true <-> clean_exp e = None.
   Proof.
     induction e;simpl.
     - split;reflexivity.
@@ -394,6 +491,100 @@ Section gnl_recomp.
         (split;[intros []|intro]);discriminate||auto.
     - rewrite IHe;destruct (clean_exp e);[split;discriminate|split;reflexivity].
   Qed.
+
+  (** * Second theorem : [gnl_decompose] is a morphism *)
+  
+  (** We first show that [flatten] is a morphism. *)
+
+  Global Instance flatten_proper o (r : relation (GExp A O)) :
+    Proper (gnl_theo_inf (fKA r) ==> gnl_theo_inf r) (flatten o).
+  Proof.
+    intros e f hyp.
+    pose proof ((gnl_theo_eq_prod_sum) r) as r1;
+    pose proof ((gnl_theo_eq_sum_prod) r) as r2;
+    pose proof ((gnl_theo_eq_prod_e_zero) r) as r3;
+    pose proof ((gnl_theo_eq_sum_assoc) r) as r4;
+    pose proof ((gnl_theo_eq_prod_assoc) r) as r5.
+    induction hyp;simpl;try destruct i;auto with proofs.
+    - eauto with proofs.
+    - pose proof (fKA_ewp_r _ _ _ hyp1) as he.
+      pose proof (fKA_ewp_r _ _ _ hyp2) as hf.
+      destruct (ewp_r e1),(ewp_r e2),(ewp_r f1),(ewp_r f2);simpl in he,hf;try discriminate;
+        repeat rewrite IHhyp1||rewrite IHhyp2;auto with proofs.
+    - unfold ewp_r;simpl.
+      generalize (flatten o g);generalize (flatten o f); generalize (flatten o e);
+      intros e' f' g'.
+      destruct (ka.r_ewp (Reg_to_reg e)),(ka.r_ewp (Reg_to_reg f)),(ka.r_ewp (Reg_to_reg g));simpl;
+      repeat rewrite (r1 o) || rewrite (r2 o) || rewrite (r3 o) || rewrite r4 || rewrite (r5 o);
+      repeat apply gnl_theo_inf_join;
+      repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
+      auto with proofs.
+    - unfold ewp_r;simpl.
+      generalize (flatten o g);generalize (flatten o f); generalize (flatten o e);
+      intros e' f' g'.
+      destruct (ka.r_ewp (Reg_to_reg e)),(ka.r_ewp (Reg_to_reg f)),(ka.r_ewp (Reg_to_reg g));simpl;
+      repeat rewrite (r1 o) || rewrite (r2 o) || rewrite (r3 o) || rewrite r4 || rewrite (r5 o);
+      repeat apply gnl_theo_inf_join;
+      repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
+      auto with proofs.
+    - unfold ewp_r;simpl.
+      generalize (flatten o g);generalize (flatten o f); generalize (flatten o e);
+      intros e' f' g'.
+      destruct (ka.r_ewp (Reg_to_reg e)),(ka.r_ewp (Reg_to_reg f)),(ka.r_ewp (Reg_to_reg g));simpl;
+      repeat rewrite (r1 o) || rewrite (r2 o) || rewrite (r3 o) || rewrite r4 || rewrite (r5 o);
+      repeat apply gnl_theo_inf_join;
+      repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
+      auto with proofs.
+    - unfold ewp_r;simpl.
+      generalize (flatten o g);generalize (flatten o f); generalize (flatten o e);
+      intros e' f' g'.
+      destruct (ka.r_ewp (Reg_to_reg e)),(ka.r_ewp (Reg_to_reg f)),(ka.r_ewp (Reg_to_reg g));simpl;
+      repeat rewrite (r1 o) || rewrite (r2 o) || rewrite (r3 o) || rewrite r4 || rewrite (r5 o);
+      repeat apply gnl_theo_inf_join;
+      repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
+      auto with proofs.
+    - repeat apply gnl_theo_inf_join;auto with proofs.
+      destruct (ewp_r e);auto with proofs.
+    - repeat apply gnl_theo_inf_join;auto with proofs.
+      destruct (ewp_r e);auto with proofs.
+    - unfold ewp_r;simpl;rewrite Bool.andb_true_r.
+      destruct (ka.r_ewp (Reg_to_reg e));simpl;repeat apply gnl_theo_inf_join;auto with proofs;
+        rewrite gnl_theo_eq_iter_unfold_left at 2
+        || rewrite gnl_theo_eq_iter_unfold_left;auto with proofs.
+    - unfold ewp_r;simpl;rewrite Bool.andb_true_r.
+      destruct (ka.r_ewp (Reg_to_reg e));simpl;repeat apply gnl_theo_inf_join;auto with proofs;
+        rewrite gnl_theo_eq_iter_unfold_right at 2
+        || rewrite gnl_theo_eq_iter_unfold_right;auto with proofs.
+    - simpl in *.
+      unfold ewp_r in *;simpl;rewrite Bool.andb_true_r.
+      destruct (ka.r_ewp (Reg_to_reg e)),(ka.r_ewp (Reg_to_reg f));simpl;
+        repeat apply gnl_theo_inf_join;auto with proofs;
+        apply gnl_theo_inf_iter_left_ind||apply gnl_theo_inf_iter_left_ind_bis;
+        rewrite <- IHhyp at 2;auto with proofs;
+        apply gnl_theo_inf_sum_right;auto with proofs.
+    - simpl in *.
+      unfold ewp_r in *;simpl;rewrite Bool.andb_true_r.
+      destruct (ka.r_ewp (Reg_to_reg e)),(ka.r_ewp (Reg_to_reg f));simpl;
+        repeat apply gnl_theo_inf_join;auto with proofs;
+        apply gnl_theo_inf_iter_right_ind||apply gnl_theo_inf_iter_right_ind_bis;
+        rewrite <- IHhyp at 2;auto with proofs;
+        apply gnl_theo_inf_sum_right;auto with proofs.
+    - simpl in IHhyp.
+      apply gnl_theo_inf_iter_left_ind_bis.
+      rewrite <- IHhyp at 2;apply gnl_theo_inf_join;auto with proofs.
+      repeat apply gnl_theo_inf_sum_right;auto with proofs.
+    - simpl in IHhyp.
+      apply gnl_theo_inf_iter_right_ind_bis.
+      rewrite <- IHhyp at 2;apply gnl_theo_inf_join;auto with proofs.
+      repeat apply gnl_theo_inf_sum_right;auto with proofs.
+    - destruct H;simpl;auto with proofs.
+      destruct H;simpl;auto;repeat apply gnl_theo_inf_join;try rewrite Tauto.if_same;auto with proofs.
+      -- transitivity (@ø A O);auto with proofs.
+      -- transitivity (@ø A O);auto with proofs.
+      -- apply gnl_theo_inf_sum_right;auto with proofs.
+  Qed.
+
+  (** Then we can show that [gnl_recompose] is one as well. *)
   
   Global Instance gnl_recompose_proper r :
     Proper (dec_inf r ==> gnl_theo_inf r) gnl_recompose.
@@ -412,95 +603,7 @@ Section gnl_recomp.
     - induction (operators e);simpl;auto with proofs.
       apply gnl_theo_inf_join;auto.
       transitivity (flatten a (gnl_reg_proj a f)).
-      + clear IHl.
-        pose proof (hyp_reg a) as hyp;clear hyp_reg hyp_slat.
-        induction hyp;simpl;try destruct i;auto with proofs.
-        * eauto with proofs.
-        * pose proof (fKA_ewp_r _ _ _ hyp1) as he.
-          pose proof (fKA_ewp_r _ _ _ hyp2) as hf.
-          destruct (ewp_r e1),(ewp_r e2),(ewp_r f1),(ewp_r f2);simpl in he,hf;try discriminate;
-            repeat rewrite IHhyp1||rewrite IHhyp2;auto with proofs.
-        * unfold ewp_r;simpl.
-          destruct (ka.r_ewp (Reg_to_reg e0)),(ka.r_ewp (Reg_to_reg f0)),(ka.r_ewp (Reg_to_reg g));
-            simpl;repeat rewrite gnl_theo_eq_prod_sum
-                  || rewrite gnl_theo_eq_sum_prod
-                  || rewrite gnl_theo_eq_prod_e_zero
-                  || rewrite gnl_theo_eq_sum_assoc
-                  || rewrite gnl_theo_eq_prod_assoc;
-            repeat apply gnl_theo_inf_join;
-            repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
-            auto with proofs.
-        * unfold ewp_r;simpl.
-          destruct (ka.r_ewp (Reg_to_reg e0)),(ka.r_ewp (Reg_to_reg f0)),(ka.r_ewp (Reg_to_reg g));
-            simpl;repeat rewrite gnl_theo_eq_prod_sum
-                  || rewrite gnl_theo_eq_sum_prod
-                  || rewrite gnl_theo_eq_prod_e_zero
-                  || rewrite gnl_theo_eq_sum_assoc
-                  || rewrite gnl_theo_eq_prod_assoc;
-            repeat apply gnl_theo_inf_join;
-            repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
-            auto with proofs.
-        * unfold ewp_r;simpl.
-          destruct (ka.r_ewp (Reg_to_reg e0)),(ka.r_ewp (Reg_to_reg f0)),(ka.r_ewp (Reg_to_reg g));
-            simpl;repeat rewrite gnl_theo_eq_prod_sum
-                  || rewrite gnl_theo_eq_sum_prod
-                  || rewrite gnl_theo_eq_prod_e_zero
-                  || rewrite gnl_theo_eq_sum_assoc
-                  || rewrite gnl_theo_eq_prod_assoc;
-            repeat apply gnl_theo_inf_join;
-            repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
-            auto with proofs.
-        * unfold ewp_r;simpl.
-          destruct (ka.r_ewp (Reg_to_reg e0)),(ka.r_ewp (Reg_to_reg f0)),(ka.r_ewp (Reg_to_reg g));
-            simpl;repeat rewrite gnl_theo_eq_prod_sum
-                  || rewrite gnl_theo_eq_sum_prod
-                  || rewrite gnl_theo_eq_prod_e_zero
-                  || rewrite gnl_theo_eq_sum_assoc
-                  || rewrite gnl_theo_eq_prod_assoc;
-            repeat apply gnl_theo_inf_join;
-            repeat apply gnl_theo_inf_join_r||apply gnl_theo_inf_sum_left;
-            auto with proofs.
-        * repeat apply gnl_theo_inf_join;auto with proofs.
-          destruct (ewp_r e0);auto with proofs.
-        * repeat apply gnl_theo_inf_join;auto with proofs.
-          destruct (ewp_r e0);auto with proofs.
-        * unfold ewp_r;simpl;rewrite Bool.andb_true_r.
-          destruct (ka.r_ewp (Reg_to_reg e0));simpl;repeat apply gnl_theo_inf_join;auto with proofs;
-            rewrite gnl_theo_eq_iter_unfold_left at 2
-            || rewrite gnl_theo_eq_iter_unfold_left;auto with proofs.
-        * unfold ewp_r;simpl;rewrite Bool.andb_true_r.
-          destruct (ka.r_ewp (Reg_to_reg e0));simpl;repeat apply gnl_theo_inf_join;auto with proofs;
-            rewrite gnl_theo_eq_iter_unfold_right at 2
-            || rewrite gnl_theo_eq_iter_unfold_right;auto with proofs.
-        * simpl in *.
-          unfold ewp_r in *;simpl;rewrite Bool.andb_true_r.
-          destruct (ka.r_ewp (Reg_to_reg e0)),(ka.r_ewp (Reg_to_reg f0));simpl;
-            repeat apply gnl_theo_inf_join;auto with proofs;
-            apply gnl_theo_inf_iter_left_ind||apply gnl_theo_inf_iter_left_ind_bis;
-            rewrite <- IHhyp at 2;auto with proofs;
-            apply gnl_theo_inf_sum_right;auto with proofs.
-        * simpl in *.
-          unfold ewp_r in *;simpl;rewrite Bool.andb_true_r.
-          destruct (ka.r_ewp (Reg_to_reg e0)),(ka.r_ewp (Reg_to_reg f0));simpl;
-            repeat apply gnl_theo_inf_join;auto with proofs;
-            apply gnl_theo_inf_iter_right_ind||apply gnl_theo_inf_iter_right_ind_bis;
-            rewrite <- IHhyp at 2;auto with proofs;
-            apply gnl_theo_inf_sum_right;auto with proofs.
-        * simpl in IHhyp.
-          apply gnl_theo_inf_iter_left_ind_bis.
-          rewrite <- IHhyp at 2;apply gnl_theo_inf_join;auto with proofs.
-          repeat apply gnl_theo_inf_sum_right;auto with proofs.
-        * simpl in IHhyp.
-          apply gnl_theo_inf_iter_right_ind_bis.
-          rewrite <- IHhyp at 2;apply gnl_theo_inf_join;auto with proofs.
-          repeat apply gnl_theo_inf_sum_right;auto with proofs.
-        * destruct H;simpl;auto with proofs.
-          destruct H;simpl;auto;repeat apply gnl_theo_inf_join;auto with proofs.
-          -- destruct (ewp_r e0);auto with proofs.
-          -- transitivity (@ø A O);auto with proofs.
-          -- destruct (ewp_r e0);auto with proofs.
-          -- transitivity (@ø A O);auto with proofs.
-          -- destruct (ewp_r e0);apply gnl_theo_inf_sum_right;auto with proofs.
+      + apply flatten_proper,hyp_reg. 
       + case_eq (inb a (operators f)).
         * rewrite <- inb_In.
           clear;induction (operators f);simpl;[tauto|].
@@ -525,16 +628,24 @@ Section gnl_recomp.
                 ** rewrite IHr0_2;auto with proofs.
   Qed.
 
+  (** * Clean recomposition *)
+  (** We now show that we can recompose the cleaned version of the projections in the same *)
+  (** manner, yielding similar results. *)
+
   Definition gnl_clean_recompose e :=
     slat_to_gnl (gnl_slat_proj e) +
-      fold_right sum ø (map (fun o => flatten o (Clean (gnl_reg_proj o (Clean e)))) (operators e)).
+      fold_right sum ø (map (fun o => flatten o (Clean (gnl_reg_proj o (Clean e)))) 
+                            (operators e)).
 
+
+  (** Some invariance properties of [Clean]. *)
   Lemma is_zero_clean_exp (e : Reg (GExp A O))  : is_zero e = is_zero (Clean e).
   Proof.
     pose proof (Clean_is_eq e) as (h1&h2).
-    apply is_zero_eq in h1,h2.
+    apply is_zero_implb in h1,h2.
     destruct (is_zero (Clean e)),(is_zero e);discriminate||reflexivity.
   Qed.
+
   Lemma ewp_clean_exp (e : Reg (GExp A O))  : ewp_r e = ewp_r (Clean e).
   Proof.
     symmetry;apply ewp_r_eq.
@@ -648,138 +759,7 @@ Section gnl_recomp.
         * rewrite <- IHe;simpl;reflexivity.
   Qed.
 
-  Lemma flatten_proper {X Op} o (r : relation (GExp X Op)) :
-    Proper (gnl_theo_inf (fKA r) ==> gnl_theo_inf r) (flatten o).
-  Proof.
-    intros e f E;induction E;simpl;try destruct i;auto with proofs.
-    - eauto with proofs.
-    - pose proof (fKA_ewp_r _ _ _ E1) as h1.
-      pose proof (fKA_ewp_r _ _ _ E2) as h2.
-      destruct (ewp_r e1),(ewp_r e2),(ewp_r f1),(ewp_r f2);try discriminate;
-        rewrite <- IHE1;rewrite <- IHE2;auto with proofs.
-    - replace (ewp_r (f@@g)) with (ewp_r f && ewp_r g)%bool by reflexivity.
-      replace (ewp_r (e@@f)) with (ewp_r e && ewp_r f)%bool by reflexivity.
-      destruct (ewp_r e),(ewp_r f),(ewp_r g);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-          || rewrite gnl_theo_eq_prod_sum
-          || rewrite gnl_theo_eq_sum_prod
-          || rewrite gnl_theo_eq_prod_e_zero
-          || rewrite gnl_theo_eq_prod_zero_e
-          || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;
-        repeat apply gnl_theo_inf_join_r
-        || apply gnl_theo_inf_sum_left;auto with proofs.
-    - replace (ewp_r (f@@g)) with (ewp_r f && ewp_r g)%bool by reflexivity.
-      replace (ewp_r (e@@f)) with (ewp_r e && ewp_r f)%bool by reflexivity.
-      destruct (ewp_r e),(ewp_r f),(ewp_r g);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-          || rewrite gnl_theo_eq_prod_sum
-          || rewrite gnl_theo_eq_sum_prod
-          || rewrite gnl_theo_eq_prod_e_zero
-          || rewrite gnl_theo_eq_prod_zero_e
-          || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;
-        repeat apply gnl_theo_inf_join_r
-        || apply gnl_theo_inf_sum_left;auto with proofs.
-    - replace (ewp_r (f + g)) with (ewp_r f || ewp_r g)%bool by reflexivity.
-      destruct (ewp_r e),(ewp_r f),(ewp_r g);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-          || rewrite gnl_theo_eq_prod_sum
-          || rewrite gnl_theo_eq_sum_prod
-          || rewrite gnl_theo_eq_prod_e_zero
-          || rewrite gnl_theo_eq_prod_zero_e
-          || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;
-        repeat apply gnl_theo_inf_join_r
-        || apply gnl_theo_inf_sum_left;auto with proofs.
-    - replace (ewp_r (e + f)) with (ewp_r e || ewp_r f)%bool by reflexivity.
-      destruct (ewp_r e),(ewp_r f),(ewp_r g);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-          || rewrite gnl_theo_eq_prod_sum
-          || rewrite gnl_theo_eq_sum_prod
-          || rewrite gnl_theo_eq_prod_e_zero
-          || rewrite gnl_theo_eq_prod_zero_e
-          || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;
-        repeat apply gnl_theo_inf_join_r
-        || apply gnl_theo_inf_sum_left;auto with proofs.
-    - rewrite Tauto.if_same.
-      repeat apply gnl_theo_inf_join;auto with proofs.
-    - rewrite Tauto.if_same.
-      repeat apply gnl_theo_inf_join;auto with proofs.
-    - replace (ewp_r (e^+)) with (ewp_r e && true)%bool by reflexivity.
-      rewrite Bool.andb_true_r.
-      destruct (ewp_r e);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-        || rewrite gnl_theo_eq_prod_sum
-        || rewrite gnl_theo_eq_sum_prod
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;auto with proofs;
-        rewrite gnl_theo_eq_iter_unfold_left at 2
-        || rewrite gnl_theo_eq_iter_unfold_left;
-        auto with proofs.
-    - replace (ewp_r (e^+)) with (ewp_r e && true)%bool by reflexivity.
-      rewrite Bool.andb_true_r.
-      destruct (ewp_r e);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-        || rewrite gnl_theo_eq_prod_sum
-        || rewrite gnl_theo_eq_sum_prod
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;auto with proofs;
-        rewrite gnl_theo_eq_iter_unfold_right at 2
-        || rewrite gnl_theo_eq_iter_unfold_right;
-        auto with proofs.
-    - replace (ewp_r (e^+)) with (ewp_r e && true)%bool by reflexivity.
-      rewrite Bool.andb_true_r;simpl in IHE.
-      destruct (ewp_r e),(ewp_r f);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-          || rewrite gnl_theo_eq_prod_sum
-          || rewrite gnl_theo_eq_sum_prod
-          || rewrite gnl_theo_eq_prod_e_zero
-          || rewrite gnl_theo_eq_prod_zero_e
-          || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;
-        repeat apply gnl_theo_inf_join_r
-        || apply gnl_theo_inf_sum_left;auto with proofs;
-        apply gnl_theo_inf_iter_left_ind_bis
-        || apply gnl_theo_inf_iter_left_ind;
-        rewrite <- IHE at 2;auto with proofs;
-        try repeat apply gnl_theo_inf_sum_right;auto with proofs.
-    - replace (ewp_r (e^+)) with (ewp_r e && true)%bool by reflexivity.
-      rewrite Bool.andb_true_r;simpl in IHE.
-      destruct (ewp_r e),(ewp_r f);simpl;auto with proofs;
-        repeat rewrite gnl_theo_eq_sum_assoc
-          || rewrite gnl_theo_eq_prod_sum
-          || rewrite gnl_theo_eq_sum_prod
-          || rewrite gnl_theo_eq_prod_e_zero
-          || rewrite gnl_theo_eq_prod_zero_e
-          || rewrite gnl_theo_eq_prod_assoc;
-        repeat apply gnl_theo_inf_join;
-        repeat apply gnl_theo_inf_join_r
-        || apply gnl_theo_inf_sum_left;auto with proofs;
-        apply gnl_theo_inf_iter_right_ind_bis
-        || apply gnl_theo_inf_iter_right_ind;
-        rewrite <- IHE at 2;auto with proofs;
-        try repeat apply gnl_theo_inf_sum_right;auto with proofs.
-    - simpl in IHE;apply gnl_theo_inf_iter_left_ind_bis;rewrite <- IHE at 2.
-      apply gnl_theo_inf_join;auto with proofs.
-      repeat apply gnl_theo_inf_sum_right;auto with proofs.
-    - simpl in IHE;apply gnl_theo_inf_iter_right_ind_bis;rewrite <- IHE at 2.
-      apply gnl_theo_inf_join;auto with proofs.
-      repeat apply gnl_theo_inf_sum_right;auto with proofs.
-    - destruct H;simpl;auto with proofs.
-      destruct H;simpl;auto with proofs.
-      + rewrite Tauto.if_same;repeat apply gnl_theo_inf_join;auto with proofs.
-        transitivity (@ø X Op);auto with proofs.
-      + rewrite Tauto.if_same;repeat apply gnl_theo_inf_join;auto with proofs.
-        transitivity (@ø X Op);auto with proofs.
-      + rewrite Tauto.if_same;repeat apply gnl_theo_inf_join;auto with proofs.
-        apply gnl_theo_inf_sum_right;auto with proofs.
-  Qed.
+  (** With these, we can show that the clean recomposition is equivalent to the standard one. *)
 
   Lemma gnl_clean_recompose_id e :
     Ø |- gnl_clean_recompose e == gnl_recompose e.

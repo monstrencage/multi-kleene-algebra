@@ -124,28 +124,6 @@ Section gnl_decomp.
                              /\ m |=(ka)= (gnl_reg_proj o e)
     end.
   
-  (** The following pair of functions allows for the projections to be converted back *)
-  (** to [GExp A O]. *)
-  
-  Fixpoint slat_to_gnl (s : slat A) : GExp A O :=
-    match s with
-    | ø => ø
-    | var a => var a
-    | e + f => slat_to_gnl e + slat_to_gnl f
-    | _ => ø
-    end.
-  
-  Fixpoint flatten (o : O) (e : Reg (GExp A O)) : GExp A O :=
-    match e with
-    | 1_r | ø => ø
-    | var (Some e) => e
-    | e @@ f =>
-        (if ewp_r e then flatten o f else ø)
-          + ((if ewp_r f then flatten o e else ø) + (flatten o e ×{o} flatten o f))
-    | e + f => flatten o e + flatten o f
-    | e^+ => iter o (flatten o e)
-    end.
-
   (** * Facts about the decomposition *)
 
   (** ** Stability of validity *)
@@ -572,22 +550,6 @@ Section gnl_decomp.
         unfold ewp_r in *;rewrite E1,E2;reflexivity.
     - pose proof (ewp_gnl_reg_trad o e) as E;
         unfold ewp_r in *;rewrite E;reflexivity.
-  Qed.
-
-  (** [gnl_reg_trad] is non-destructive, since we can get back from it an expression *)
-  (** that is equivalent to the original argument. *)
-  
-  Lemma flatten_gnl_reg_trad (o : O) (e : GExp A O) :
-    Ø |- e == flatten o (gnl_reg_trad o e).
-  Proof.
-    induction e as [ | | |i|i];simpl;auto;try destruct (i =?= o);subst;simpl;
-      repeat rewrite ewp_gnl_reg_trad;
-      try (rewrite <-IHe1,<-IHe2)||(rewrite <-IHe);simpl;
-      try (eexists;split;[reflexivity|]);try reflexivity||auto with proofs.
-    - cut (forall e : GExp A O, gnl_theo_eq Ø (sum zero e) e).
-      + intro h;repeat rewrite h;reflexivity.
-      + clear;intro;split;auto with proofs.
-    - split;eauto with proofs.
   Qed.
 
   (** Helper lemma to lift the invariance of [|=(ø)=] with respect equivalences on *)
@@ -1699,22 +1661,25 @@ Section gnl_decomp.
     | inr (_,l) => In s l
     end.
 
-  (* Lemma sub_expr_sat e f : *)
-  (*   sub_expr e f -> exists s t, s |=(Ø)= e /\ sub_term s t /\ t |=(Ø)= f. *)
-  (* Proof. *)
-  (*   intro hyp. *)
-  (*   pose proof hyp as V;apply sub_expr_implies_is_deep_clean in V. *)
-  (*   destruct (deep_clean_sat e V) as (t&ht). *)
-  (*   destruct hyp as (o&h). *)
-  (*   apply clean_support_sat_iff in h as (s&hsat&hIn);[|apply Clean_is_clean]. *)
-  (*   rewrite Clean_is_eq in hsat. *)
-  (*   cut(exists l, list_lift (gnl_theo_sat Ø) l (Word_to_list s) /\ In t l). *)
-  (*     intro h;ax *)
-  (*   intros (o&h). *)
-  (* Qed. *)
+  (* Lemma sub_expr_sat e f :
+    sub_expr e f -> exists s t, s |=(Ø)= e /\ sub_term s t /\ t |=(Ø)= f.
+  Proof.
+    intro hyp.
+    pose proof hyp as V;apply sub_expr_implies_is_deep_clean in V.
+    destruct (deep_clean_sat e V) as (t&ht).
+    destruct hyp as (o&h).
+    apply clean_support_sat_iff in h as (s&hsat&hIn);[|apply Clean_is_clean].
+    rewrite Clean_is_eq in hsat.
+
+    
+    cut(exists l, list_lift (gnl_theo_sat Ø) l (Word_to_list s) /\ In t l).
+    - intros (l&h1&h2).
+
+      intro h;ax
+    intros (o&h).
+  Qed. *)
 End gnl_decomp.
 
-  (* (** *) *)
   (* Lemma KA_sat_gnl_sat_trad  (o : O) (l : list (GTerm A O)) m e : *)
   (*   m |=(ka)= gnl_reg_trad o e -> list_lift (gnl_theo_sat Ø) l (Word_to_list m) -> *)
   (*   exists s', GProd o l = Some s' /\ s' |=(Ø)= e. *)
