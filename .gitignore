@@ -1,12 +1,12 @@
 *~
-CoqMakefile
-CoqMakefile.conf
+Makefile.coq
+Makefile.coq.conf
 
 ## local sandbox
 ka_with_relation_algebra.v 
 
 ## documentation, to be regenerated
-html/
+html/*
 
 ## GitHub generated list of ignored patterns, from the prompt 'Coq'
 
