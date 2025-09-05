@@ -645,10 +645,13 @@ Section cka_to_gnl.
   Global Instance reg_theo_to_cKA :
     Proper (gnl_theo_inf cKA ==> cKA_inf) Reg_to_reg.
   Proof.
-    assert (KA_eq_KA_inf: forall e f : reg A, cKA_eq e f -> cKA_inf e f)
+    assert (cKA_eq_cKA_inf: forall e f : reg A, e =cKA f -> e ≤cKA f)
+      by (intros ? ? ->;reflexivity).
+    assert (KA_eq_cKA_inf: forall e f : reg A, e =KA f -> e ≤cKA f)
       by (intros ? ? ->;reflexivity).
     intros e f pr;induction pr;try destruct i;simpl;auto with proofs;
-      try (now apply KA_eq_KA_inf;auto with proofs).
+      try (now apply cKA_eq_cKA_inf;auto with proofs)
+      || (now apply KA_eq_cKA_inf;auto with proofs).
     - rewrite IHpr1,IHpr2;reflexivity.
     - rewrite IHpr1,IHpr2;reflexivity.
     - rewrite IHpr;reflexivity.
@@ -658,7 +661,7 @@ Section cka_to_gnl.
     - unfold cKA_inf;auto with proofs.
     - rewrite cKA_eq_star_unfold at 2.
       rewrite cKA_eq_prod_sum.
-      rewrite cKA_eq_prod_e_one.
+      rewrite KA_eq_prod_e_one.
       reflexivity.
     - rewrite KA_eq_star_unfold_right at 2.
       rewrite KA_eq_prod_sum.
@@ -669,7 +672,7 @@ Section cka_to_gnl.
       generalize dependent (Reg_to_reg f);
         generalize dependent (Reg_to_reg e);clear e f pr;intros e f.
       intro h.
-      transitivity (r_prod (r_star e) f);
+      transitivity (e^* ×r f);
         [|apply cKA_inf_star_ind,h].
       apply r_prod_cmono;[|reflexivity].
       rewrite KA_eq_star_unfold_left at 2.
@@ -678,20 +681,20 @@ Section cka_to_gnl.
       generalize dependent (Reg_to_reg f);
         generalize dependent (Reg_to_reg e);clear e f pr;intros e f.
       intro h.
-      transitivity (r_prod f (r_star e)).
+      transitivity (f ×r e^*).
       + apply r_prod_cmono;[reflexivity|].
         rewrite KA_eq_star_unfold_left at 2.
         apply cKA_inf_join_r.
-      + transitivity (r_prod (r_star e) f);auto with proofs.
+      + transitivity (e^* ×r f);auto with proofs.
         apply cKA_inf_star_ind.
-        transitivity (r_prod f e);auto with proofs.
+        transitivity (f ×r e);auto with proofs.
     - simpl in *.
       generalize dependent (Reg_to_reg f);
         generalize dependent (Reg_to_reg e);clear e f pr;intros e f.
       intro h.
-      assert (h1: cKA_inf e f) by (rewrite <- h;apply cKA_inf_join_l).
-      assert (h2: cKA_inf (r_prod e f) f) by (rewrite <- h at 2;apply cKA_inf_join_r).
-      transitivity (r_prod (r_star e) f);
+      assert (h1: e ≤cKA f) by (rewrite <- h;apply cKA_inf_join_l).
+      assert (h2: e ×r f ≤cKA f) by (rewrite <- h at 2;apply cKA_inf_join_r).
+      transitivity (e^* ×r f);
         [|apply cKA_inf_star_ind;rewrite <- h at 2;apply cKA_inf_join_r].
       rewrite KA_eq_star_unfold_right at 1.
       rewrite KA_eq_prod_sum.
@@ -710,13 +713,13 @@ Section cka_to_gnl.
       generalize dependent (Reg_to_reg f);
         generalize dependent (Reg_to_reg e);clear e f pr;intros e f.
       intro h.
-      assert (h1: cKA_inf e f) by (rewrite <- h;apply cKA_inf_join_l).
-      assert (h2: cKA_inf (r_prod f e) f) by (rewrite <- h at 2;apply cKA_inf_join_r).
+      assert (h1: e ≤cKA  f) by (rewrite <- h;apply cKA_inf_join_l).
+      assert (h2: f ×r e ≤cKA f) by (rewrite <- h at 2;apply cKA_inf_join_r).
       rewrite h1 at 1.
-      transitivity (r_prod (r_star e) f);auto with proofs.
+      transitivity (e^* ×r f);auto with proofs.
       apply cKA_inf_star_ind.
-      transitivity (r_prod f e);auto with proofs.
-    - destruct H;simpl;try (now apply KA_eq_KA_inf;auto with proofs).
+      transitivity (f ×r e);auto with proofs.
+    - destruct H;simpl;try (now apply cKA_eq_cKA_inf;auto with proofs).
   Qed.
 
   Global Instance reg_theo_to_cKA_eq :

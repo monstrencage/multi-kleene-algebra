@@ -273,7 +273,7 @@ Section depth.
   (** ** Basic operations and properties *)
 
   (** We now turn our attention to _lists of depth elements_, interpreted as   *)
-  (** finite sets, i.e. considered up-to [eq_list]. *)
+  (** finite sets, i.e. considered up-to [≈set]]. *)
 
   (** We will (strictly) order such lists as follows : [l] is smaller than [m] *)
   (** if [m] is not empty and if every element in [l] is strictly smaller than *)
@@ -467,7 +467,7 @@ Section depth.
           -- (exists (d_op k k'),(d_op i n);repeat split;simpl_depth;auto;destruct n;f_equal;lia).
   Qed.
 
-  Lemma DIter_unfold_left o l : eq_list (l++DProd o l (DIter o l)) (DIter o l). 
+  Lemma DIter_unfold_left o l : l++DProd o l (DIter o l) ≈set DIter o l. 
   Proof.
     intro d.
     repeat setoid_rewrite DIter_spec||setoid_rewrite DProd_spec||setoid_rewrite in_app_iff.
@@ -506,7 +506,7 @@ Section depth.
   Qed.
 
 
-  Lemma DStar_unfold_left o l : eq_list (DProd o (d_one::l) (DStar o l)) (DStar o l). 
+  Lemma DStar_unfold_left o l : DProd o (d_one::l) (DStar o l) ≈set DStar o l. 
   Proof.
     intro d.
     repeat setoid_rewrite DStar_spec||setoid_rewrite DProd_spec||setoid_rewrite in_app_iff.
@@ -793,7 +793,7 @@ Section depth.
   
   Lemma depth_list_inf_app l m1 m2 :
     m1 <> [] -> m2 <> [] -> depth_list_inf l (m1++m2) ->
-    exists l1 l2, eq_list l (l1++l2)
+    exists l1 l2, l ≈set l1++l2
                   /\ depth_list_inf l1 m1
                   /\ depth_list_inf l2 m2.
   Proof.

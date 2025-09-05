@@ -1,8 +1,18 @@
+(** * gnl_alg.cka: Classic encodiing of commutative Kleene algebra *)
 Require Import prelim ka.
   
 Section creg.
+  (** * Axiomatisation *)
   Context {A : Set} {decA : decidable_set A}.
 
+  (** ** Definition *)
+
+  (** The axiomatic definition of [=cKA] is almost identical to that of [=KA] *)
+  (** with the addition of the commutativity axiom. This addition allows use  *)
+  (** to drop a few axioms: only one side of the axioms pertaining to the     *)
+  (** interaction between [×r] and the constants is needed, and similary the  *)
+  (** star axioms (unfolding and induction) only need one version each, the   *)
+  (** other being derivable from the first one and the commutativity axiom.   *)
   Reserved Notation " e =cKA f" (at level 60).
   
   Inductive cKA_eq : relation (reg A) :=
@@ -14,6 +24,7 @@ Section creg.
   | cKA_eq_star e1 e2 : e1 =cKA e2 -> e1^*  =cKA e2^* 
   | cKA_eq_prod_assoc e f g : e ×r (f ×r g) =cKA (e ×r f) ×r g
   | cKA_eq_sum_assoc e f g : e +r (f +r g) =cKA (e +r f) +r g
+  (** Commutativity axiom *)
   | cKA_eq_prod_comm e f : e ×r f =cKA f ×r e
   | cKA_eq_sum_comm e f : e +r f =cKA f +r e
   | cKA_eq_sum_idem e : e +r e =cKA e
@@ -25,9 +36,16 @@ Section creg.
   | cKA_eq_star_ind e f : (e ×r f) +r f =cKA f -> ((e^* ) ×r f) +r f =cKA f
   where " e =cKA f " := (cKA_eq e f).
   
-
   Hint Constructors cKA_eq : proofs.
   
+  (** The order [≤cKA] is defined like [≤KA]. *)
+
+  Definition cKA_inf : relation (reg A) := fun e f => e +r f =cKA f.
+
+  Infix "≤cKA" := cKA_inf (at level 60).
+
+  (** ** Standard properties  *)
+
   Global Instance cKA_eq_equiv : Equivalence cKA_eq.
   Proof.
     split.
@@ -45,34 +63,25 @@ Section creg.
   Global Instance r_star_cproper : Proper (cKA_eq ==> cKA_eq) r_star.
   Proof. intros s s' es;apply cKA_eq_star;assumption. Qed.
 
-  Lemma cKA_eq_prod_e_one e : e ×r 1r =cKA e.
-  Proof. transitivity (1r ×r e);auto with proofs. Qed.
-  Lemma cKA_eq_sum_e_zero e : e +r 0r =cKA e.
-  Proof. transitivity (0r +r e);auto with proofs. Qed.
-  Lemma cKA_eq_sum_prod e f g : (f +r g) ×r e =cKA (f ×r e) +r (g ×r e).
-  Proof.
-    transitivity (e ×r (f +r g));auto with proofs.
-    transitivity ((e ×r f) +r (e ×r g));auto with proofs.
-  Qed.
-  Lemma cKA_eq_prod_zero_e e : 0r ×r e =cKA 0r.
-  Proof. transitivity (e ×r 0r);auto with proofs. Qed.
-
-  Hint Resolve cKA_eq_prod_e_one cKA_eq_sum_e_zero cKA_eq_sum_prod cKA_eq_prod_zero_e : proofs.
+  (** We check that [=KA] is a subrelation of [=cKA], in essence proving that *)
+  (** the axioms we dropped can be recovered. *)
 
   Global Instance KA_incl_cKA : subrelation KA_eq cKA_eq.
   Proof.
     intros e f pr;induction pr;simpl;auto with proofs.
     - eauto with proofs.
+    - transitivity (1r ×r e);auto with proofs.
+    - transitivity (g ×r (e +r f));auto with proofs.
+      transitivity ((g ×r e) +r (g ×r f));auto with proofs.
+    - transitivity (e ×r 0r);auto with proofs.
     - transitivity (1r +r (e ×r (e^* )));auto with proofs.
     - transitivity (r_sum ((e^* ) ×r f) f);auto with proofs.
       apply cKA_eq_star_ind.
       transitivity ((f ×r e) +r f);auto with proofs.
   Qed.
 
-  Definition cKA_inf : relation (reg A) := fun e f => e +r f =cKA f.
+  (** ** Properties of the preorder *)
 
-  Infix "≤cKA" := cKA_inf (at level 60).
-  
   Global Instance cKA_inf_preorder : PreOrder cKA_inf.
   Proof.
     split.
@@ -83,6 +92,7 @@ Section creg.
       + rewrite cKA_eq_sum_assoc.
         rewrite h1,h2;reflexivity.
   Qed.
+  
   Global Instance cKA_inf_partialorder : PartialOrder cKA_eq cKA_inf.
   Proof.
     intros e f;unfold Basics.flip,cKA_inf;split.
@@ -91,13 +101,30 @@ Section creg.
       rewrite <- E1,cKA_eq_sum_comm,E2.
       reflexivity.
   Qed.
+  
+  Global Instance KA_incl_cKA_inf : subrelation KA_inf cKA_inf.
+  Proof. unfold cKA_inf,KA_inf;intros e f h;rewrite h;reflexivity. Qed.
+
+  Lemma cKA_inf_join e f g : cKA_inf e g -> cKA_inf f g -> e +r f ≤cKA g.
+  Proof. 
+    unfold cKA_inf;intros h1 h2;rewrite <- h1,<- h2 at 2;symmetry;
+    apply cKA_eq_sum_assoc. 
+  Qed.
+
+  Lemma cKA_inf_sum_l e f g : cKA_inf e f -> e ≤cKA f +r g.
+  Proof. intros ->;rewrite <-KA_inf_join_l;reflexivity. Qed.
+  Lemma cKA_inf_sum_r e f g : cKA_inf e g -> e ≤cKA f +r g.
+  Proof. intros ->;rewrite <-KA_inf_join_r;reflexivity. Qed.
+  Lemma cKA_inf_star_ind e f : e ×r f ≤cKA f -> e^* ×r f ≤cKA f.
+  Proof. apply (cKA_eq_star_ind e f). Qed.
+
   Global Instance r_prod_cmono : Proper (cKA_inf ==> cKA_inf ==> cKA_inf) r_prod.
   Proof.
     unfold cKA_inf;intros e1 e2 he f1 f2 hf.
     rewrite <- he,<- hf. 
-    repeat rewrite cKA_eq_sum_prod||rewrite cKA_eq_prod_sum.
-    repeat rewrite cKA_eq_sum_assoc.
-    rewrite cKA_eq_sum_idem.
+    repeat rewrite KA_eq_sum_prod||rewrite KA_eq_prod_sum.
+    repeat rewrite KA_eq_sum_assoc.
+    rewrite KA_eq_sum_idem.
     reflexivity.
   Qed.
  
@@ -116,65 +143,51 @@ Section creg.
     repeat rewrite cKA_eq_sum_assoc.
     reflexivity.
   Qed.
-  Lemma cKA_inf_join_l e f : e ≤cKA e +r f.
-  Proof. unfold cKA_inf;rewrite cKA_eq_sum_assoc,cKA_eq_sum_idem;reflexivity. Qed.
-  Lemma cKA_inf_join_r e f : f ≤cKA e +r f.
-  Proof. unfold cKA_inf;rewrite cKA_eq_sum_comm,<-cKA_eq_sum_assoc,cKA_eq_sum_idem;reflexivity. Qed.
-  Lemma cKA_inf_join e f g : cKA_inf e g -> cKA_inf f g -> e +r f ≤cKA g.
-  Proof. unfold cKA_inf;intros h1 h2;rewrite <- h1,<- h2 at 2;symmetry;apply cKA_eq_sum_assoc. Qed.
 
-  Lemma cKA_inf_sum_l e f g : cKA_inf e f -> e ≤cKA f +r g.
-  Proof. intros ->;apply cKA_inf_join_l. Qed.
-  Lemma cKA_inf_sum_r e f g : cKA_inf e g -> e ≤cKA f +r g.
-  Proof. intros ->;apply cKA_inf_join_r. Qed.
 
-  Lemma cKA_inf_zero e : cKA_inf 0r e.
-  Proof. unfold cKA_inf;auto with proofs. Qed.
-  
-  Lemma cKA_inf_star_one e : 1r ≤cKA e^* .
-  Proof. rewrite cKA_eq_star_unfold;apply cKA_inf_join_l. Qed.
-  Lemma cKA_inf_star_e e : e ≤cKA e^* .
-  Proof.
-    rewrite cKA_eq_star_unfold.
-    rewrite <- cKA_inf_star_one,cKA_eq_prod_e_one.
-    apply cKA_inf_join_r.
-  Qed.
-  Lemma cKA_inf_star_ind e f : e ×r f ≤cKA f -> e^* ×r f ≤cKA f.
-  Proof. apply (cKA_eq_star_ind e f). Qed.
-  Lemma cKA_inf_star_alt_ind e f : e ×r f^* ≤cKA f^* -> e^* ≤cKA f^*.
-  Proof.
-    intro h;apply cKA_inf_star_ind in h as <-.
-    rewrite <- (cKA_inf_star_one f),cKA_eq_prod_e_one;reflexivity.
-  Qed.
-  
-  Lemma cKA_eq_star_prod_star (e : reg A) : e^* ×r e^* =cKA e^*.
-  Proof.
-    apply cKA_inf_partialorder;unfold Basics.flip;split.
-    - apply cKA_inf_star_ind.
-      rewrite (cKA_eq_star_unfold e) at 2.
-      apply cKA_inf_join_r.
-    - rewrite <- cKA_inf_star_one at 2.
-      rewrite cKA_eq_prod_one_e.
-      reflexivity.
-  Qed.
-  
-  Lemma cKA_eq_star_star (e : reg A) : (e^* )^*  =cKA e^* .
-  Proof.
-    apply cKA_inf_partialorder;unfold Basics.flip;split.
-    - apply cKA_inf_star_alt_ind.
-      rewrite cKA_eq_star_prod_star.
-      reflexivity.
-    - apply cKA_inf_star_e.
-  Qed.
-  
   Global Instance r_star_cmono : Proper (cKA_inf ==> cKA_inf) r_star.
   Proof.
     intros e f h.
-    apply cKA_inf_star_alt_ind.
-    rewrite h.
-    rewrite cKA_eq_star_unfold at 2.
-    apply cKA_inf_join_r.
+    rewrite cKA_eq_star_unfold at 1.
+    rewrite cKA_eq_prod_comm.
+    apply cKA_inf_join.
+    - rewrite <- KA_inf_star_one;reflexivity.
+    - rewrite h at 2.
+      rewrite (KA_inf_star_e f) at 1.
+      apply cKA_inf_star_ind.
+      rewrite h;rewrite cKA_eq_star_unfold at 2.
+      rewrite <- KA_inf_join_r.
+      reflexivity.
   Qed.
+
+  (** ** [cKA] versions of [KA] lemmas, trivially proved by convenient to have. *)
+
+  Lemma cKA_inf_join_l e f : e ≤cKA e +r f.
+  Proof. rewrite <- KA_inf_join_l;reflexivity. Qed.
+  
+  Lemma cKA_inf_join_r e f : f ≤cKA e +r f.
+  Proof. rewrite <- KA_inf_join_r;reflexivity. Qed.
+  
+  Lemma cKA_inf_zero e : 0r ≤cKA e.
+  Proof. rewrite <- (KA_inf_zero e);reflexivity. Qed.
+  
+  Lemma cKA_inf_star_one e : 1r ≤cKA e^* .
+  Proof. rewrite <- (KA_inf_star_one e);reflexivity. Qed.
+
+  Lemma cKA_inf_star_e e : e ≤cKA e^* .
+  Proof. rewrite <- KA_inf_star_e;reflexivity. Qed.
+
+  Lemma cKA_inf_star_alt_ind e f : e ×r f^* ≤cKA f^* -> e^* ≤cKA f^*.
+  Proof.
+    intro h;apply cKA_inf_star_ind in h as <-.
+    rewrite <- (cKA_inf_star_one f),KA_eq_prod_e_one;reflexivity.
+  Qed.
+  
+  (** * Semantics *)
+  
+  (** The definition of [|=cKA] is similar to that of [|=KA], except we replace *)
+  (** equality between lists with the relation [≈mset] in the cases of   *)
+  (** [×r] and [^*]. *)
 
   Reserved Notation " l |=cKA e " (at level 60).
 
@@ -183,15 +196,17 @@ Section creg.
     | 0r => False
     | 1r => l = []
     | r_var a => l = [a]
-    | e ×r f => exists l1 l2, eq_list_comm l (l1 ++ l2) /\ l1 |=cKA e /\ l2 |=cKA f
+    | e ×r f => exists l1 l2, l ≈mset l1 ++ l2 /\ l1 |=cKA e /\ l2 |=cKA f
     | e +r f => l |=cKA e \/ l |=cKA f
-    | e^* => exists L, eq_list_comm l (concat L) /\ forall k, In k L -> k |=cKA e
+    | e^* => exists L, l ≈mset concat L /\ forall k, In k L -> k |=cKA e
     end
   where " l |=cKA e " := (cKA_sat l e).
 
+  (** The semantic relation is stable by [≈mset]. *)
+
   Lemma cKA_sat_eq_list_comm : Proper (eq_list_comm ==> eq ==> iff) cKA_sat.
   Proof.
-    cut (forall e l m, eq_list_comm l m -> l |=cKA e -> m |=cKA e);
+    cut (forall e l m, l ≈mset m -> l |=cKA e -> m |=cKA e);
       [intros h l m elm e f <-;split;apply h;[|symmetry];assumption|].
     intro e;induction e;intros l m E;simpl.
     - intros ->; apply eq_list_comm_sngl, E.
@@ -208,6 +223,7 @@ Section creg.
       transitivity l;[symmetry|];assumption.
   Qed.
 
+  (** Our axiomatisation is sound with respect to our semantics. *)
 
   Lemma cKA_sound s : Proper (cKA_eq ==> iff) (cKA_sat s).
   Proof.
@@ -265,6 +281,8 @@ Section creg.
              reflexivity.
   Qed.
 
+  (** The previous pair of lemmas can be combined as the following property: *)
+
   Global Instance cKA_sat_proper : Proper (eq_list_comm ==> cKA_eq ==> iff) cKA_sat.
   Proof.
     intros l1 l2 hl e1 e2 he.
@@ -272,7 +290,10 @@ Section creg.
     apply cKA_sound,he.
   Qed.
 
-  Lemma cKA_sat_KA_sat s e : s |=cKA e <-> exists l, eq_list_comm s l /\ l |=KA e.
+  (** ** Semantic decomposition *)
+  (** The semantics of [|=cKA] are essentially that of [|=KA] up-to [≈mset]. *)
+
+  Proposition cKA_sat_KA_sat s e : s |=cKA e <-> exists l, s ≈mset l /\ l |=KA e.
   Proof.
     revert s;induction e;simpl;intros s;try tauto.
     - split;[intros hs|intros (l&E&hs)];subst.
@@ -322,45 +343,6 @@ Section creg.
 End creg.
 Hint Constructors cKA_eq : proofs. 
 
-Hint Resolve cKA_eq_prod_e_one cKA_eq_sum_e_zero cKA_eq_sum_prod cKA_eq_prod_zero_e : proofs.
-
 Infix "=cKA" := cKA_eq (at level 60).
 Infix "≤cKA" := cKA_inf (at level 60).
 Infix "|=cKA" := cKA_sat (at level 60).
-
-(* Section creg_functor. *)
-
-(*   Lemma Distr_cspec {A : Set} {decA : decidable_set A} (e : reg (list A)) : *)
-(*     forall w, w |=cKA Distr e <-> exists l, list_lift (@In A) w l /\ l |=cKA e. *)
-(*   Proof. *)
-(*     intros w. *)
-(*     repeat setoid_rewrite cKA_sat_KA_sat. *)
-(*     setoid_rewrite Distr_spec. *)
-(*     split. *)
-(*     - intros (l&hl&m&hm&hsat). *)
-(*       assert (multiset_lift (@In A) w m) as (l'&h1&h2) *)
-(*           by (apply multiset_lift_inv;exists l;split;auto). *)
-(*       exists l';split;auto. *)
-(*       exists m;split;auto. *)
-(*     - intros (l&h1&m&h2&hsat). *)
-(*       assert (multiset_lift (@In A) w m) as h3 *)
-(*           by (exists l;split;auto). *)
-(*       apply multiset_lift_inv in h3 as (l'&h3&h4);exists l';split;auto. *)
-(*       exists m;split;auto.  *)
-(*   Qed. *)
-
-(*   Context  {A : Set} {rA : relation A} {sumA : list A -> A} . *)
-(*   Inductive mixed_ceq: relation (reg A) := *)
-(*   | mceq_refl e : mixed_ceq e e *)
-(*   | mceq_sym e f : mixed_ceq e f -> mixed_ceq f e *)
-(*   | mceq_trans e f g : mixed_ceq e f -> mixed_ceq f g -> mixed_ceq e g *)
-(*   | mceq_cka e f : e =cKA f -> mixed_ceq e f *)
-(*   | mceq_r e f : reg_lift rA e f -> mixed_ceq e f *)
-(*   | mceq_Distr E : mixed_ceq (Distr E) (reg_map sumA E). *)
-
-(*   Hint Constructors mixed_ceq : proofs. *)
-(*   Global Instance mixed_ceq_equiv : Equivalence mixed_ceq. *)
-(*   Proof. split;intro;intros;eauto with proofs. Qed. *)
-  
-(* End creg_functor. *)
-(* Hint Constructors mixed_ceq : proofs. *)

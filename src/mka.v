@@ -1,24 +1,41 @@
+(** * gnl_alg.mka: multi Kleene algebra *)
+
 Require Import prelim gnl theories gnl_decomp.
 
-
 Section mKAs.
+(** * Strict multi Kleene algebra *)
   Context {A : Set}{decA:decidable_set A}.
   Context {Os : Set}{decOs:decidable_set Os}.
   Context {Op : Set}{decOp:decidable_set Op}.
 
+  (** This algebra use two kinds of operators, one of which is intended to be commutative. *)
 
   Definition mRegs := GExp A (Os+Op).
   Definition mSPs := GTerm A (Os+Op).
 
+  (** Specifically, we postulate axiomatically that operators from [Op] are commutative. *)
+
   Inductive mkas : relation mSPs :=
-  | par_comm_msps o s t : mkas (s -[inr o]- t) (t -[inr o]- s). 
+  | par_comm_msps (o : Op) s t : mkas (s -[inr o]- t) (t -[inr o]- s). 
 
   Inductive mKAs : relation mRegs :=
-  | par_comm_ms o e f : mKAs (e ×{inr o} f) (f ×{inr o} e). 
+  | par_comm_ms (o : Op) e f : mKAs (e ×{inr o} f) (f ×{inr o} e). 
 
   Hint Constructors mkas mKAs : proofs.
 
+  (** [mKAs] is sound with respect to the [mkas] satisfaction relation. *)
+
+  Global Instance mKAs_sound s :
+    Proper (mKAs ==> Basics.impl) (gnl_theo_sat mkas s).
+  Proof.
+    intros e f h hyp.
+    destruct h;eauto with proofs.
+    revert hyp;intros (s1&s2&h1&h2&h3);exists s2,s1;repeat split;eauto with proofs.
+  Qed.
   
+  (** We modify accordingly the notion of equivalence between decompositions, to allow *)
+  (** for some commutativity in the case of decompositions whose top operator is from [Op]. *)
+
   Definition mSPs_decomposition := @gnl_decomposition A (Os+Op).
 
   Definition mSPs_decomp_eq : relation mSPs_decomposition :=
@@ -31,6 +48,8 @@ Section mKAs.
           o = o' /\ multiset_lift (gnl_term_theo_eq mkas) l m
       | _,_ => False
       end.
+
+  (** As usual, we ensure that this is indeed an equivalence relation. *)
 
   Global Instance mSPs_decomp_eq_Equiv : Equivalence mSPs_decomp_eq.
   Proof.
@@ -47,6 +66,9 @@ Section mKAs.
       etransitivity;eassumption.
   Qed.
  
+  (** The following pair of lemmas show how the axiomatic relation on words get lifted to *)
+  (** [gnl_term_to_list], first in the case of [Os] operator, then in the case of [Op] ones. *)
+
   Lemma msps_decompose_proper_lifted o e1 e2:
     mkas |- e1 =T= e2 ->
     list_lift (gnl_term_theo_eq mkas) (gnl_term_to_list (inl o) e1) (gnl_term_to_list (inl o) e2).
@@ -95,6 +117,9 @@ Section mKAs.
         repeat split;auto with proofs.
   Qed.
   
+  (** This allows us to prove that [gnl_decompose] is a morphism with respect to our axiomatic *)
+  (** relation and new equivalence on decompositions. *)
+
   Lemma msps_decompose_proper : Proper (gnl_term_theo_eq mkas ==> mSPs_decomp_eq) gnl_decompose.
   Proof.
     intros s t pr;induction pr;simpl;auto.
@@ -112,6 +137,8 @@ Section mKAs.
       eexists;split;[reflexivity|].
       apply eq_list_comm_app_comm.
   Qed.
+
+  (** We also show that the recomposition function is also a morphism w.r.t. the same relations. *)
 
   Lemma msps_recompose_proper :
     Proper (mSPs_decomp_eq ==> or_none (gnl_term_theo_eq mkas)) gnl_recompose.
@@ -152,15 +179,25 @@ Section mKAs.
                 transitivity ((t1 -[inr o]- a)-[inr o]- t2);eauto with proofs.
   Qed.
 
+  (** We now look at the satisfaction relation between decompositions and projected expressions. *)
+
+  (** We define the following: *)
   Definition mKAs_decomp_sat : mSPs_decomposition -> mRegs -> Prop :=
     fun d e =>
       match d with
+      (** - for variables, we do not change anything; *) 
       | inl a => a |=slat= (gnl_slat_proj e)
+      (** - same for [Os] operators; *)
       | inr (inl o,l) => exists m, list_lift (gnl_theo_sat mkas) l (Word_to_list m)
                                    /\  m |=(ka)= gnl_reg_proj (inl o) e
+      (** - however, for [Op] operators, we replace [list_lift] with [multiset_lift], to allow for some commutativity. *)
       | inr (inr o,l) => exists m, multiset_lift (gnl_theo_sat mkas) l (Word_to_list m)
                                    /\ m |=(ka)= gnl_reg_proj (inr o) e
       end.
+
+  (** Another definition could be used: insead of changing [list_lift], we could have replaced *)
+  (** the satisfaction relation with [|=(cka)=]. *)
+
   Definition mKAs_decomp_sat_bis : mSPs_decomposition -> mRegs -> Prop :=
     fun d e =>
       match d with
@@ -171,6 +208,8 @@ Section mKAs.
                                    /\  m |=(cka)= gnl_reg_proj (inr o) e
       end.
   
+  (** Both definitions are equivalent. *)
+
   Lemma mKAs_decomp_sat_iff_bis d e :
     mKAs_decomp_sat d e <-> mKAs_decomp_sat_bis d e.
   Proof.
@@ -189,6 +228,8 @@ Section mKAs.
       rewrite h2;reflexivity.
   Qed.
 
+  (** The functions [get_var] and [get_op] are compatible with the theory [mkas]. *)
+
   Lemma get_var_msps_eq e f : mkas |- e =T= f -> get_var e = get_var f.
   Proof.
     intro pr;induction pr;simpl;auto.
@@ -196,7 +237,6 @@ Section mKAs.
     - destruct H.
       simpl;reflexivity.
   Qed.
-
   
   Lemma get_op_msps_eq  (e f : gnl_term) : mkas |- e =T= f -> get_op e = get_op f.
   Proof.
@@ -205,17 +245,20 @@ Section mKAs.
     - destruct H.
       simpl;reflexivity.
   Qed.
+
+  (** As in the case of the empty theory, the [slat] projection captures exactly the variables *)
+  (** satisfying an expression. *)
   
-  Lemma gnl_msps_sat_vars  (e : gnl_exp) :
-    forall x, t_var x |=(mkas)= e ->  x |=slat= gnl_slat_proj e.
+  Lemma gnl_msps_sat_vars_iff  (e : gnl_exp) :
+    forall x, t_var x |=(mkas)= e <-> x |=slat= gnl_slat_proj e.
   Proof.
-    induction e;simpl.
+    intro x;split;induction e;simpl.
     - tauto.
-    - intros x0 E;apply get_var_msps_eq in E;inversion E;reflexivity.
+    - intros E;apply get_var_msps_eq in E;inversion E;reflexivity.
     - intuition.
-    - intros x (s1&s2&E&_&_).
+    - intros (s1&s2&E&_&_).
       apply get_var_msps_eq in E;inversion E. 
-    - intros x (s'&L&hs'&E&hL).
+    - intros (s'&L&hs'&E&hL).
       revert s' hs' E.
       induction L;simpl.
       + discriminate.
@@ -226,37 +269,19 @@ Section mKAs.
           apply get_var_msps_eq in E.
           destruct s';inversion E.
           reflexivity.
-  Qed.
-  
-  Lemma gnl_msps_sat_vars_iff  (e : gnl_exp) :
-    forall x, t_var x |=(mkas)= e <-> x |=slat= gnl_slat_proj e.
-  Proof.
-    intro x;split;[apply gnl_msps_sat_vars|revert x].
-    induction e;simpl.
     - tauto.
-    - intros x0 E.
+    - intros E.
       apply get_var_eq in E;inversion E;subst;clear E.
       reflexivity.
     - intuition.
     - tauto. 
-    - intros x ih;apply IHe in ih.
+    - intros ih;apply IHe in ih.
       exists (t_var x),[t_var x];repeat split;auto with proofs.
       intros ? [<-|F];[|exfalso;apply F];auto.
   Qed.
 
-  
-  Global Instance mKAs_sound s :
-    Proper (mKAs ==> Basics.impl) (gnl_theo_sat mkas s).
-  Proof.
-    intros e f h hyp.
-    destruct h;eauto with proofs.
-    revert hyp;intros (s1&s2&h1&h2&h3);exists s2,s1;repeat split;eauto with proofs.
-  Qed.
-  
-  Lemma mKAs_sat_to_gnl_sat s e :
-    s |=(mkas)= e <-> exists t, mkas |- s =T= t /\ t |=(Ø)= e.
-  Proof. apply gnl_theo_sat_decompose. Qed.
-  
+  (** Variant of the lemma [gnl_decompose_eq], in the case of the theory [mkas]. *)
+
   Lemma msps_decompose_eq :
     forall s t : mSPs,
       mkas |- s =T= t ->
@@ -282,6 +307,8 @@ Section mKAs.
       right;right;exists o,l,m;auto.
   Qed.
 
+  (** Main theorem of the section, [mKAs] enjoys a semantic decomposition correspondance.*)
+
   Theorem mKAs_semantic_decomposition d e :
     mKAs_decomp_sat d e <-> exists s, mSPs_decomp_eq d (gnl_decompose s)
                                       /\ s |=(mkas)= e.
@@ -301,7 +328,7 @@ Section mKAs.
             in h1 as (k&h1&h3).
           -- exists k;split;auto;simpl.
              exists m;split;auto.
-          -- intros;apply mKAs_sat_to_gnl_sat;assumption.
+          -- intros;apply gnl_theo_sat_decompose;assumption.
         * intros (l'&h1&m&h2&h3).
           exists m;split;auto.
           rewrite h1.
@@ -310,7 +337,7 @@ Section mKAs.
           induction l';simpl;auto.
           intros [];simpl;auto.
           intros (h1&h2);split;auto.
-          apply mKAs_sat_to_gnl_sat;exists a;split;auto with proofs.
+          apply gnl_theo_sat_decompose;exists a;split;auto with proofs.
       + setoid_rewrite gnl_semantic_correspondance.
         split.
         * intros (l'&h1&t'&h2&h3).
@@ -333,12 +360,12 @@ Section mKAs.
              intros (h1&h2);split;auto.
              replace a with (id a) by reflexivity.
              rewrite h1;unfold id;reflexivity.
-          -- apply mKAs_sat_to_gnl_sat;exists t';split;auto with proofs.
+          -- apply gnl_theo_sat_decompose;exists t';split;auto with proofs.
         * intros (s&h1&h2).
           remember (gnl_decompose s) as d.
           destruct d as [|([],m)];try tauto.
           destruct h1 as (<-&h1).
-          apply mKAs_sat_to_gnl_sat in h2 as (t&h2&h3).
+          apply gnl_theo_sat_decompose in h2 as (t&h2&h3).
           apply msps_decompose_eq in h2 as [(a&->&->)|[(o'&m1&m2&hm1&hm2&hT2)
                                                       |(o'&m1&m2&hm1&hm2&hT2)]];
             simpl;try rewrite hm1 in Heqd;try inversion Heqd;subst;clear Heqd.
@@ -359,7 +386,7 @@ Section mKAs.
                 ** simpl.
                    exists m;split;auto.
              ++ exists k;split;auto.
-          -- intros;apply mKAs_sat_to_gnl_sat;assumption.
+          -- intros;apply gnl_theo_sat_decompose;assumption.
         * intros (l'&(k&h1&h1')&m&h2&h3).
           exists m;split;auto.
           cut (multiset_lift (gnl_theo_sat Ø) k (Word_to_list m));
@@ -369,7 +396,7 @@ Section mKAs.
           split;auto.
           eapply list_lift_composition_inv;[|apply h1|apply h4].
           intros s f t H1 H2.
-          apply mKAs_sat_to_gnl_sat.
+          apply gnl_theo_sat_decompose.
           exists t;auto.
      + setoid_rewrite gnl_semantic_correspondance.
         split.
@@ -397,12 +424,12 @@ Section mKAs.
              split;auto.
              replace a with (id a) by reflexivity.
              rewrite h1;unfold id;reflexivity.
-          -- apply mKAs_sat_to_gnl_sat;exists t';split;auto with proofs.
+          -- apply gnl_theo_sat_decompose;exists t';split;auto with proofs.
         * intros (s&h1&h2).
           remember (gnl_decompose s) as d.
           destruct d as [|([],m)];try tauto.
           destruct h1 as (<-&h1).
-          apply mKAs_sat_to_gnl_sat in h2 as (t&h2&h3).
+          apply gnl_theo_sat_decompose in h2 as (t&h2&h3).
           apply msps_decompose_eq in h2 as [(a&->&->)|[(o'&m1&m2&hm1&hm2&hT2)
                                                       |(o'&m1&m2&hm1&hm2&hT2)]];
             simpl;try rewrite hm1 in Heqd;try inversion Heqd;subst;clear Heqd.
@@ -750,50 +777,57 @@ Section mKA.
         repeat rewrite IHpr1||rewrite IHpr2;
         repeat apply gnl_theo_inf_join;auto with proofs;
         repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l.
-    - generalize (mReg_to_mRegs g);generalize (mReg_to_mRegs f);generalize (mReg_to_mRegs e);
-        intros a b c.
-      destruct (ewp e),(ewp f),(ewp g);simpl;
-        repeat rewrite (gnl_theo_inf_prod_zero_e mKAs)
-        || rewrite (gnl_theo_inf_prod_e_zero mKAs)
+    - destruct (ewp e),(ewp f),(ewp g);simpl;
+        repeat rewrite (gnl_theo_inf_prod_zero_e mKAs i)
+        || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
         || rewrite (gnl_theo_eq_sum_zero_e mKAs)
         || rewrite (gnl_theo_eq_sum_e_zero mKAs)
-        || rewrite (gnl_eq_sum_prod mKAs)
-        || rewrite (gnl_eq_prod_sum mKAs)
-        || rewrite (gnl_eq_prod_assoc mKAs)
+        || rewrite (gnl_eq_sum_prod mKAs i)
+        || rewrite (gnl_eq_prod_sum mKAs i)
+        || rewrite (gnl_eq_prod_assoc mKAs i)
+        || rewrite (gnl_eq_sum_assoc mKAs);
+        repeat apply gnl_theo_inf_join; 
+        auto with proofs;
+        try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
+        try (now transitivity zero;eauto with proofs).
+    - destruct (ewp e),(ewp f),(ewp g);simpl;
+        repeat rewrite (gnl_theo_inf_prod_zero_e mKAs i)
+        || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
+        || rewrite (gnl_theo_eq_sum_zero_e mKAs)
+        || rewrite (gnl_theo_eq_sum_e_zero mKAs)
+        || rewrite (gnl_eq_sum_prod mKAs i)
+        || rewrite (gnl_eq_prod_sum mKAs i)
+        || rewrite (gnl_eq_prod_assoc mKAs i)
         || rewrite (gnl_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs).
     - destruct (ewp e),(ewp f),(ewp g);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
+        repeat rewrite (gnl_theo_inf_prod_zero_e mKAs i)
+        || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
+        || rewrite (gnl_theo_eq_sum_zero_e mKAs)
+        || rewrite (gnl_theo_eq_sum_e_zero mKAs)
+        || rewrite (gnl_eq_sum_prod mKAs i)
+        || rewrite (gnl_eq_prod_sum mKAs i)
+        || rewrite (gnl_eq_prod_assoc mKAs i)
+        || rewrite (gnl_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs).
     - destruct (ewp e),(ewp f),(ewp g);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
+        repeat rewrite (gnl_theo_inf_prod_zero_e mKAs i)
+        || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
+        || rewrite (gnl_theo_eq_sum_zero_e mKAs)
+        || rewrite (gnl_theo_eq_sum_e_zero mKAs)
+        || rewrite (gnl_eq_sum_prod mKAs i)
+        || rewrite (gnl_eq_prod_sum mKAs i)
+        || rewrite (gnl_eq_prod_assoc mKAs i)
+        || rewrite (gnl_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs).
-    - destruct (ewp e),(ewp f),(ewp g);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
-        repeat apply gnl_theo_inf_join;auto with proofs;
-        try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
-        try (now transitivity zero;eauto with proofs).
+    - rewrite Tauto.if_same;repeat apply gnl_theo_inf_join;auto with proofs.
+    - rewrite Tauto.if_same;repeat apply gnl_theo_inf_join;auto with proofs.
     - destruct (ewp e);simpl;
         repeat rewrite gnl_eq_sum_assoc
         || rewrite gnl_eq_prod_assoc
@@ -803,36 +837,20 @@ Section mKA.
         || rewrite gnl_eq_prod_sum  ;
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
-        try (now transitivity zero;eauto with proofs).
+        try (now transitivity zero;eauto with proofs);
+        eauto with proofs.
      - destruct (ewp e);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
+        repeat rewrite (gnl_theo_inf_prod_zero_e mKAs i)
+        || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
+        || rewrite (gnl_theo_eq_sum_zero_e mKAs)
+        || rewrite (gnl_theo_eq_sum_e_zero mKAs)
+        || rewrite (gnl_eq_sum_prod mKAs i)
+        || rewrite (gnl_eq_prod_sum mKAs i)
+        || rewrite (gnl_eq_prod_assoc mKAs i)
+        || rewrite (gnl_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
-         try (now transitivity zero;eauto with proofs).
-     - destruct (ewp e);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
-        repeat apply gnl_theo_inf_join;auto with proofs;
-        try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
-         try (now eauto with proofs).
-     - destruct (ewp e);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
-        || rewrite gnl_theo_eq_prod_zero_e
-        || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
-        repeat apply gnl_theo_inf_join;auto with proofs;
-        try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
+        try (now transitivity zero;eauto with proofs);
          try (now eauto with proofs).
      - simpl in *.
        generalize dependent (mReg_to_mRegs f);
@@ -942,27 +960,29 @@ Section mKA.
       intros E2 h2 E1 h1.
       destruct (ewp e1),(ewp e2);simpl;auto with proofs.
     - destruct (ewp e1),(ewp e2);simpl;
+      generalize dependent (mRegs_to_mReg (mReg_to_mRegs e1));intros f1 ih1;
+      generalize dependent (mRegs_to_mReg (mReg_to_mRegs e2));intros f2 ih2;
          repeat rewrite gnl_eq_sum_assoc
-         || rewrite gnl_eq_prod_assoc
-         || rewrite gnl_theo_eq_prod_one_e
-         || rewrite gnl_theo_eq_prod_e_one
-         || rewrite gnl_theo_eq_prod_zero_e
-         || rewrite gnl_theo_eq_prod_e_zero
-         || rewrite gnl_eq_sum_prod
-         || rewrite gnl_eq_prod_sum;
+         || rewrite (gnl_eq_prod_assoc mKA o)
+         || rewrite (gnl_theo_eq_prod_one_e o)
+         || rewrite (gnl_theo_eq_prod_e_one o)
+         || rewrite (gnl_theo_eq_prod_zero_e mKA o)
+         || rewrite (gnl_theo_eq_prod_e_zero mKA o)
+         || rewrite (gnl_eq_sum_prod mKA o)
+         || rewrite (gnl_eq_prod_sum mKA o);
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
     - destruct (ewp e);simpl;
-         repeat rewrite gnl_eq_sum_assoc
-         || rewrite gnl_eq_prod_assoc
-         || rewrite gnl_theo_eq_prod_one_e
-         || rewrite gnl_theo_eq_prod_e_one
-         || rewrite gnl_theo_eq_sum_zero_e
-         || rewrite gnl_theo_eq_sum_e_zero
-         || rewrite gnl_theo_eq_prod_zero_e
-         || rewrite gnl_theo_eq_prod_e_zero
-         || rewrite gnl_eq_sum_prod
-         || rewrite gnl_eq_prod_sum;
+         repeat rewrite (gnl_eq_sum_assoc mKA)
+         || rewrite (gnl_eq_prod_assoc mKA o)
+         || rewrite (gnl_theo_eq_prod_one_e o)
+         || rewrite (gnl_theo_eq_prod_e_one o)
+         || rewrite (gnl_theo_eq_sum_zero_e mKA)
+         || rewrite (gnl_theo_eq_sum_e_zero mKA)
+         || rewrite (gnl_theo_eq_prod_zero_e mKA o)
+         || rewrite (gnl_theo_eq_prod_e_zero mKA o)
+         || rewrite (gnl_eq_sum_prod mKA o)
+         || rewrite (gnl_eq_prod_sum mKA o);
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
       clear IHe.

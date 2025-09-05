@@ -160,15 +160,15 @@ Qed.
 
 (** The type with no element, is decidable. *)
 
-Inductive Zero : Set := .
+Notation Zero := Empty_set.
 
 Global Instance dec_Zero : decidable_set Zero.
 Proof. intros []. Qed.
 
 (** The type with a single element, is decidable. *)
-Inductive One : Set := sngl_elt.
+Notation One := unit.
 
-Notation "•" := sngl_elt.
+Notation "•" := tt.
 
 Global Instance One_dec : decidable_set One.
 Proof. intros [] [];left;reflexivity. Qed.
@@ -212,6 +212,8 @@ Section eq_list.
   
   Definition eq_list : relation (list A) :=
     fun l m => forall a, In a l <-> In a m.
+  
+  Infix "≈set" := eq_list (at level 61).  
 
   (** This is indeed an equivalence relation. *)
   
@@ -229,17 +231,17 @@ Section eq_list.
 
   (** It is a commutative and idempotent operator with respect to this relation. *)
   
-  Lemma app_comm l1 l2 : eq_list (l1++l2) (l2++l1).
+  Lemma app_comm l1 l2 : l1++l2 ≈set l2++l1.
   Proof. intro a;repeat rewrite in_app_iff;tauto. Qed.
 
-  Lemma app_idem l : eq_list (l++l) l.
+  Lemma app_idem l : l++l ≈set l.
   Proof. intro a;repeat rewrite in_app_iff;tauto. Qed.
 
   (** If the base set is decidable, then the equivalence is decidable. *)
   
   Context {decA : decidable_set A}.
   
-  Lemma dec_eq_list l m : {eq_list l m} + { ~ eq_list l m}.
+  Lemma dec_eq_list l m : {l ≈set m} + { ~ l ≈set m}.
   Proof.
     revert l;induction m as [|b m];intros l.
     - destruct l as [|a l].
@@ -290,6 +292,8 @@ Section eq_list.
   
 End eq_list.
 
+Infix "≈set" := eq_list (at level 61).  
+
 (** * Comparing lists up-to commutativity *)
 
 Section eq_list_comm.
@@ -304,6 +308,8 @@ Section eq_list_comm.
 
   Definition eq_list_comm (l m : list A) :=
     forall a, count_occ eq_dec l a = count_occ eq_dec m a.
+
+  Infix "≈mset" := eq_list_comm (at level 61).  
 
   (** This constitutes an equivalence relation. *)
 
@@ -330,12 +336,12 @@ Section eq_list_comm.
 
   (** As expected, concatenation is commutative up-to this relation. *)
 
-  Lemma eq_list_comm_app_comm l m : eq_list_comm (l++m) (m++l).
+  Lemma eq_list_comm_app_comm l m : l++m ≈mset m++l.
   Proof. intro a;repeat rewrite count_occ_app;apply PeanoNat.Nat.add_comm. Qed.
 
   (** For singleton lists, [eq_list_comm] is equality. *)
 
-  Lemma eq_list_comm_sngl m a : eq_list_comm [a] m -> m = [a]. 
+  Lemma eq_list_comm_sngl m a : [a] ≈mset m -> m = [a]. 
   Proof.
     intro E;destruct m as [|b [|c]];[exfalso| |exfalso];pose proof (E a) as f;simpl in f;
       rewrite eq_dec_eq in f.
@@ -360,7 +366,7 @@ Section eq_list_comm.
 
   (** The same holds for the empty list. *)
 
-  Lemma eq_list_comm_nil m : eq_list_comm [] m -> m = [].
+  Lemma eq_list_comm_nil m : [] ≈mset m -> m = [].
   Proof.
     intro E; destruct m as [|a];[reflexivity|].
     exfalso;pose proof (E a) as f;simpl in f;rewrite eq_dec_eq in f.
@@ -371,8 +377,7 @@ Section eq_list_comm.
   (** to a list [a::l], then a sub list equivalent to [l] can be extracted from it. *)
 
   Lemma eq_list_comm_cons a l m :
-    eq_list_comm (a::l) m ->
-    exists m1 m2, m = m1 ++ a::m2 /\ eq_list_comm l (m1++m2).
+    a::l ≈mset m -> exists m1 m2, m = m1 ++ a::m2 /\ l ≈mset m1++m2.
   Proof.
     intros h;cut (In a m).
     - intro h'.
@@ -472,7 +477,7 @@ Section eq_list_comm.
 
   (** This procedure is correct. *)
 
-  Lemma test_eq_comm_spec l m : test_eq_comm l m = true <-> eq_list_comm l m.
+  Lemma test_eq_comm_spec l m : test_eq_comm l m = true <-> l ≈mset m.
   Proof.
     revert m;induction l;intro m.
     - destruct m;split;auto.
@@ -502,12 +507,14 @@ Section eq_list_comm.
 
   (** Thus equivalence of lists is decidable. *)
   
-  Lemma dec_eq_list_comm l m : {eq_list_comm l m} + {~ eq_list_comm l m}.
+  Lemma dec_eq_list_comm l m : {l ≈mset m} + {~ l ≈mset m}.
   Proof.
     case_eq (test_eq_comm l m);intro E;[left|right];rewrite <- test_eq_comm_spec;rewrite E;
       [reflexivity|discriminate].
   Qed.
 End eq_list_comm.
+
+Infix "≈mset" := eq_list_comm (at level 61).
 
 (** * Lifting relations to lists *)
 
@@ -534,7 +541,7 @@ Section list_lift.
   
   Definition multiset_lift {A B : Set} {decB : decidable_set B} :
     (A -> B -> Prop) -> list A -> list B -> Prop :=
-    fun r l m => exists l', list_lift r l l' /\ eq_list_comm l' m.
+    fun r l m => exists l', list_lift r l l' /\ l' ≈mset m.
 
   (** ** Properties of the plain lifting *)
 
@@ -766,7 +773,7 @@ Section list_lift.
 
   Lemma multiset_lift_inv {X Y} {decX : decidable_set X} {decY : decidable_set Y}
     (r : X -> Y -> Prop):
-    forall l m, multiset_lift r l m <-> exists k, eq_list_comm l k /\ list_lift r k m.
+    forall l m, multiset_lift r l m <-> exists k, l ≈mset k /\ list_lift r k m.
   Proof.
     induction l;intros m;split.
     - intros (k&h1&h2).

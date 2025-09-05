@@ -639,6 +639,7 @@ Section gnl_recomp.
 
 
   (** Some invariance properties of [Clean]. *)
+  
   Lemma is_zero_clean_exp (e : Reg (GExp A O))  : is_zero e = is_zero (Clean e).
   Proof.
     pose proof (Clean_is_eq e) as (h1&h2).
