@@ -2,6 +2,9 @@
 CoqMakefile
 CoqMakefile.conf
 
+## local sandbox
+ka_with_relation_algebra.v 
+
 ## GitHub generated list of ignored patterns, from the prompt 'Coq'
 
 .*.aux
@@ -49,3 +52,4 @@ time-of-build-after.log
 time-of-build-before.log
 time-of-build-both.log
 time-of-build-pretty.log
+time-of-build.log
