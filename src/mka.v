@@ -446,10 +446,13 @@ Arguments mRegs : clear implicits.
 Arguments mSPs : clear implicits.
 
 Section mKA.
+  (** * Multi Kleene algebra *)
   Context {A : Set}{decA:decidable_set A}.
   Context {Os : Set}{decOs:decidable_set Os}.
   Context {Op : Set}{decOp:decidable_set Op}.
 
+  (** Multi Kleene algebra adds to the syntax of [mKA] the constant [1]. *)
+  (** This amounts to working with a set of variables [option A]. *)
 
   Definition mReg := GExp (option A) (Os+Op).
   Definition mSP := GTerm (option A) (Os+Op).
@@ -459,6 +462,10 @@ Section mKA.
   Notation var_m := (fun a : A => var (Some a)).
   Notation var_msp := (fun a : A => t_var (Some a)).
   
+  (** The axioms are essentially the ones from [ka] with the ones from [mkas], *)
+  (** i.e. the axioms for [1] plus those for making operators from [Op] *)
+  (** commutative. *)
+
   Inductive mka : relation mSP :=
   | one_left_msp o w : mka (1_msp -[o]- w) w
   | one_right_msp o w : mka (w -[o]- 1_msp) w
@@ -472,9 +479,48 @@ Section mKA.
   | par_comm_m o e f : mKA (e ×{inr o} f) (f ×{inr o} e). 
 
   Hint Constructors mka mKA : proofs.
-  Notation in_mlang := (gnl_theo_sat mka).
-  Infix " =mKA " := (gnl_theo_eq mKA) (at level 50).
-  Infix " <=mKA " := (gnl_theo_inf mKA) (at level 50).
+  (* Notation in_mlang := (gnl_theo_sat mka). *)
+  (* Infix " =mKA " := (gnl_theo_eq mKA) (at level 50).
+  Infix " <=mKA " := (gnl_theo_inf mKA) (at level 50). *)
+ 
+  (** [mKA] is sound w.r.t. [|=(mka)=]. *)
+
+  Global Instance mKA_sound s :
+    Proper (mKA ==> Basics.impl) (gnl_theo_sat mka s).
+  Proof.
+    intros e f h hyp.
+    revert hyp;destruct h;simpl.
+    + intros (s1&s2&h1&h2&h3).
+      cut (mka |- s =T= s2).
+      * intros ->;assumption.
+      * rewrite h1,h2;auto with proofs.
+    + intros (s1&s2&h1&h2&h3).
+      cut (mka |- s =T= s1).
+      * intros ->;assumption.
+      * rewrite h1,h3;auto with proofs.
+    + intros h;exists 1_msp,s;repeat split;auto with proofs.
+    + intros h;exists s,1_msp;repeat split;auto with proofs.
+    + intros (s1&s2&h1&h2&h3);exists s2,s1;repeat split;eauto with proofs.
+  Qed.
+
+  (** The following pair of obvious results will be helpful. *)
+
+  Lemma mKA_prod_one_e i e:
+    mKA |- 1_m ×{i} e == e.
+  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
+
+  Lemma mKA_prod_e_one i e :
+    mKA |- e  ×{i} 1_m == e.
+  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed. 
+
+  (** We now show how [1] can be elminated, thus reducing this algebra *)
+  (** to the previous one. *)
+
+  (** ** Reduction of terms *)
+  
+  (** We start by defining translations back and forth between [mSP] terms and *)
+  (** [option mSPs], mapping [1] (and equivalent terms) to [None], and _cleanning_ *)
+  (** other terms to remove [1]s. *)
   
   Definition prod_opt o :
     option (mSPs A Os Op) -> option (mSPs A Os Op) -> option (mSPs A Os Op) :=
@@ -505,7 +551,10 @@ Section mKA.
   | Some s => mSPs_to_mSP s
   end.
   
-  Lemma mSPs_opt_to_mSP_and_back s :
+  (** Starting from [option mSPs], we can translate back and forth and land *)
+  (** back on the exact term we started with. *)
+
+  Lemma mSPs_opt_to_mSP_and_back (s : option (mSPs A Os Op)) :
     mSP_to_mSPs_opt (mSPs_opt_to_mSP s) = s.
   Proof.
     destruct s;simpl;auto.
@@ -514,6 +563,9 @@ Section mKA.
     reflexivity.
   Qed.
   
+  (** Starting from [mSP], we may not get exactly the same term by going around *)
+  (** the translations, but be get an [mka]-equivalent term. *)
+
   Lemma mSP_to_mSPs_and_back s :
     mka |- mSPs_opt_to_mSP (mSP_to_mSPs_opt s) =T= s.
   Proof.
@@ -522,6 +574,8 @@ Section mKA.
     destruct (mSP_to_mSPs_opt s1), (mSP_to_mSPs_opt s2);simpl;auto with proofs.
   Qed.
   
+  (** Both translations are morphisms. *)
+
   Lemma mSP_to_mSPs_opt_proper :
     Proper (gnl_term_theo_eq mka ==> or_none (gnl_term_theo_eq mkas)) mSP_to_mSPs_opt.
   Proof.
@@ -548,6 +602,33 @@ Section mKA.
     - destruct H;simpl;auto with proofs.
   Qed.
   
+  (** We'll need later on to detect whether a [mSP] term is equivalent to [1]. *)
+  (** The following function will help us do just that. *)
+  
+  Definition is_one : mSP -> bool :=
+  fun s => 
+    match mSP_to_mSPs_opt s with
+    | None => true
+    | Some _ => false
+    end.
+
+  Lemma is_one_spec s : is_one s = true <-> mka |- 1_msp =T= s.
+  Proof.
+    unfold is_one;split.
+    - induction s as [[|]|];simpl;discriminate||auto with proofs.
+      destruct (mSP_to_mSPs_opt s1), (mSP_to_mSPs_opt s2);simpl in *;try discriminate.
+      intros _.
+      rewrite <- IHs1,<- IHs2 by reflexivity.
+      auto with proofs.
+    - intros h;apply mSP_to_mSPs_opt_proper in h.
+      destruct (mSP_to_mSPs_opt s);auto.
+  Qed.
+  
+  (** ** Empty word property *)
+  (** Before we embark on the translation between expressions, we need to take care *)
+  (** of the empty word property for [mKA] expressions. This works exactly like *)
+  (** in the case of [KA]. *)
+
   Fixpoint ewp (e : mReg) : bool :=
     match e with
     | var (Some _) | zero => false
@@ -556,6 +637,9 @@ Section mKA.
     | sum e f => ewp e || ewp f
     | iter _ e => ewp e
     end.
+
+  (** [ewp] is a morphism from expressions ordered by [≤mKA] to the booleans *)
+  (** ordered by implication. *)
 
    Global Instance ewp_inf : Proper (gnl_theo_inf mKA ==> Bool.le) ewp.
    Proof.
@@ -590,44 +674,9 @@ Section mKA.
      destruct (ewp e),(ewp f);simpl in *;auto.
    Qed.
   
-  Global Instance mKA_sound s :
-    Proper (mKA ==> Basics.impl) (gnl_theo_sat mka s).
-  Proof.
-    intros e f h hyp.
-    revert hyp;destruct h;simpl.
-    + intros (s1&s2&h1&h2&h3).
-      cut (mka |- s =T= s2).
-      * intros ->;assumption.
-      * rewrite h1,h2;auto with proofs.
-    + intros (s1&s2&h1&h2&h3).
-      cut (mka |- s =T= s1).
-      * intros ->;assumption.
-      * rewrite h1,h3;auto with proofs.
-    + intros h;exists 1_msp,s;repeat split;auto with proofs.
-    + intros h;exists s,1_msp;repeat split;auto with proofs.
-    + intros (s1&s2&h1&h2&h3);exists s2,s1;repeat split;eauto with proofs.
-  Qed.
-  
-  Definition is_one : mSP -> bool :=
-  fun s => 
-    match mSP_to_mSPs_opt s with
-    | None => true
-    | Some _ => false
-    end.
-
-  Lemma is_one_spec s : is_one s = true <-> mka |- 1_msp =T= s.
-  Proof.
-    unfold is_one;split.
-    - induction s as [[|]|];simpl;discriminate||auto with proofs.
-      destruct (mSP_to_mSPs_opt s1), (mSP_to_mSPs_opt s2);simpl in *;try discriminate.
-      intros _.
-      rewrite <- IHs1,<- IHs2 by reflexivity.
-      auto with proofs.
-    - intros h;apply mSP_to_mSPs_opt_proper in h.
-      destruct (mSP_to_mSPs_opt s);auto.
-  Qed.
+  (** [ewp] characterizes expressions satisfied by the term [1]. *)
      
-  Lemma ewp_spec e : ewp e = true <-> in_mlang 1_msp e.
+  Lemma ewp_spec e : ewp e = true <-> 1_msp |=(mka)= e.
   Proof.
     induction e as [|[|]| | |];simpl.
     - split;[discriminate|tauto].
@@ -640,7 +689,7 @@ Section mKA.
       split.
       + intros (h1&h2);exists 1_msp,1_msp;repeat split;auto with proofs.
       + intros (s1&s2&h&h1&h2).
-        cut (gnl_term_theo_eq mka 1_msp s1 /\ gnl_term_theo_eq mka 1_msp s2).
+        cut (mka |- 1_msp =T= s1 /\ mka |- 1_msp =T= s2).
         * intros (h'1&h'2);rewrite h'1,h'2 at 1; tauto.
         * repeat rewrite <- is_one_spec in *.
           unfold is_one in *;simpl in *.
@@ -663,7 +712,10 @@ Section mKA.
         destruct (mSP_to_mSPs_opt a), (mSP_to_mSPs_opt T); simpl in *;auto.
   Qed.
 
-  Lemma ewp_alt_spec e : ewp e = true <-> 1_m <=mKA e.
+  (** Equivalently, it captures expressions that are provably larger than the *)
+  (** expression [1]. *)
+
+  Lemma ewp_alt_spec e : ewp e = true <-> mKA |- 1_m ≤ e.
   Proof.
     split.
     - induction e as [|[|]| | |];simpl;discriminate||auto with proofs.
@@ -676,6 +728,12 @@ Section mKA.
       simpl in h;assumption.
   Qed.
   
+  (** ** Reduction of expressions *)
+
+  (** The reduction will exclude the constant [1], whose treatment is managed *)
+  (** by [ewp]. Therefore in the translation from [mKA] to [mKAs], both constants *)
+  (** are mapped to [ø]. *)
+
   Fixpoint mReg_to_mRegs (e : mReg) : mRegs A Os Op := 
   match e with
   | ø | 1_m => ø
@@ -688,6 +746,8 @@ Section mKA.
   | e^{o} => (mReg_to_mRegs e)^{o}
   end.
   
+  (** The translation back to [mKA] is a simple injection. *)
+
   Fixpoint mRegs_to_mReg (e : mRegs A Os Op) : mReg := 
   match e with
   | ø => ø
@@ -697,22 +757,17 @@ Section mKA.
   | e^{o} => (mRegs_to_mReg e)^{o}
   end.
   
+  (** Mechanically, since the cosntant [1] is absent from the syntax of [mKAs], *)
+  (** translations of such expressions do not enjoy the empty word property. *)
+
   Lemma ewp_mRegs_to_mReg e : ewp (mRegs_to_mReg e) = false.
   Proof.
     induction e;simpl;auto.
     - rewrite IHe1,IHe2;auto.
     - rewrite IHe1,IHe2;auto.
   Qed.
-    
-  Lemma mRegs_to_mReg_and_back e :
-    mKAs |- (mReg_to_mRegs (mRegs_to_mReg e)) == e.
-  Proof.
-    induction e;simpl;try rewrite IHe||rewrite IHe1,IHe2;
-     try (now split;auto with proofs).
-    repeat rewrite ewp_mRegs_to_mReg.
-    rewrite IHe1,IHe2.
-    split;auto 10 with proofs.
-  Qed.
+
+  (** Both transformations are morphisms. *)
   
   Global Instance mRegs_to_mReg_proper :
     Proper (gnl_theo_inf mKAs ==> gnl_theo_inf mKA) mRegs_to_mReg.
@@ -721,48 +776,6 @@ Section mKA.
     - eauto with proofs.
     - destruct H;simpl;auto with proofs.
   Qed.
-
-  Lemma gnl_eq_sum_assoc {X O : Set} (r : relation (@gnl_exp X O)) e f g :
-    gnl_theo_eq r (sum e (sum f g)) (sum (sum e f) g).
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-  Lemma gnl_eq_prod_assoc {X O : Set} (r : relation (@gnl_exp X O)) o e f g :
-    gnl_theo_eq r (prod o e (prod o f g)) (prod o (prod o e f) g).
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-  
-  Lemma gnl_eq_sum_prod {X O : Set} (r : relation (@gnl_exp X O)) o e f g :
-    gnl_theo_eq r (prod o (sum f g) e) (sum (prod o f e) (prod o g e)).
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-
-  Lemma gnl_eq_prod_sum {X O : Set} (r : relation (@gnl_exp X O)) o e f g :
-    gnl_theo_eq r (prod o e (sum f g)) (sum (prod o e f) (prod o e g)).
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-
-  Lemma gnl_theo_eq_sum_zero_e:
-    forall {X O : Set} (r : relation gnl_exp) (e : @gnl_exp X O),
-    gnl_theo_eq r (sum zero e) e.
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-
-  Lemma gnl_theo_eq_sum_e_zero:
-    forall {X O : Set} (r : relation gnl_exp) (e : @gnl_exp X O),
-      gnl_theo_eq r (sum e zero) e.
-  Proof. split;repeat apply gnl_theo_inf_join;auto with proofs. Qed.
-
-  Lemma gnl_theo_eq_prod_zero_e:
-    forall {X O : Set} (r : relation gnl_exp) (i : O) (e : @gnl_exp X O),
-    gnl_theo_eq r (prod i zero e) zero.
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-
-  Lemma gnl_theo_eq_prod_e_zero:
-    forall {X O : Set} (r : relation gnl_exp) (i : O) (e : @gnl_exp X O),
-      gnl_theo_eq r (prod i e zero) zero.
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-  Lemma gnl_theo_eq_prod_one_e i e:
-    gnl_theo_eq mKA (prod i 1_m e) e.
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
-
-  Lemma gnl_theo_eq_prod_e_one i e :
-    gnl_theo_eq mKA (prod i e 1_m) e.
-  Proof. split;repeat apply gnl_theo_inf_join;eauto with proofs. Qed.
 
   Global Instance mReg_to_mRegs_proper :
     Proper (gnl_theo_inf mKA ==> gnl_theo_inf mKAs) mReg_to_mRegs.
@@ -782,10 +795,10 @@ Section mKA.
         || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
         || rewrite (gnl_theo_eq_sum_zero_e mKAs)
         || rewrite (gnl_theo_eq_sum_e_zero mKAs)
-        || rewrite (gnl_eq_sum_prod mKAs i)
-        || rewrite (gnl_eq_prod_sum mKAs i)
-        || rewrite (gnl_eq_prod_assoc mKAs i)
-        || rewrite (gnl_eq_sum_assoc mKAs);
+        || rewrite (gnl_theo_eq_sum_prod mKAs i)
+        || rewrite (gnl_theo_eq_prod_sum mKAs i)
+        || rewrite (gnl_theo_eq_prod_assoc mKAs i)
+        || rewrite (gnl_theo_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join; 
         auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
@@ -795,10 +808,10 @@ Section mKA.
         || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
         || rewrite (gnl_theo_eq_sum_zero_e mKAs)
         || rewrite (gnl_theo_eq_sum_e_zero mKAs)
-        || rewrite (gnl_eq_sum_prod mKAs i)
-        || rewrite (gnl_eq_prod_sum mKAs i)
-        || rewrite (gnl_eq_prod_assoc mKAs i)
-        || rewrite (gnl_eq_sum_assoc mKAs);
+        || rewrite (gnl_theo_eq_sum_prod mKAs i)
+        || rewrite (gnl_theo_eq_prod_sum mKAs i)
+        || rewrite (gnl_theo_eq_prod_assoc mKAs i)
+        || rewrite (gnl_theo_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs).
@@ -807,10 +820,10 @@ Section mKA.
         || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
         || rewrite (gnl_theo_eq_sum_zero_e mKAs)
         || rewrite (gnl_theo_eq_sum_e_zero mKAs)
-        || rewrite (gnl_eq_sum_prod mKAs i)
-        || rewrite (gnl_eq_prod_sum mKAs i)
-        || rewrite (gnl_eq_prod_assoc mKAs i)
-        || rewrite (gnl_eq_sum_assoc mKAs);
+        || rewrite (gnl_theo_eq_sum_prod mKAs i)
+        || rewrite (gnl_theo_eq_prod_sum mKAs i)
+        || rewrite (gnl_theo_eq_prod_assoc mKAs i)
+        || rewrite (gnl_theo_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs).
@@ -819,22 +832,22 @@ Section mKA.
         || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
         || rewrite (gnl_theo_eq_sum_zero_e mKAs)
         || rewrite (gnl_theo_eq_sum_e_zero mKAs)
-        || rewrite (gnl_eq_sum_prod mKAs i)
-        || rewrite (gnl_eq_prod_sum mKAs i)
-        || rewrite (gnl_eq_prod_assoc mKAs i)
-        || rewrite (gnl_eq_sum_assoc mKAs);
+        || rewrite (gnl_theo_eq_sum_prod mKAs i)
+        || rewrite (gnl_theo_eq_prod_sum mKAs i)
+        || rewrite (gnl_theo_eq_prod_assoc mKAs i)
+        || rewrite (gnl_theo_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs).
     - rewrite Tauto.if_same;repeat apply gnl_theo_inf_join;auto with proofs.
     - rewrite Tauto.if_same;repeat apply gnl_theo_inf_join;auto with proofs.
     - destruct (ewp e);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
+        repeat rewrite gnl_theo_eq_sum_assoc
+        || rewrite gnl_theo_eq_prod_assoc
         || rewrite gnl_theo_eq_prod_zero_e
         || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
+        || rewrite gnl_theo_eq_sum_prod
+        || rewrite gnl_theo_eq_prod_sum  ;
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs);
@@ -844,10 +857,10 @@ Section mKA.
         || rewrite (gnl_theo_inf_prod_e_zero mKAs i)
         || rewrite (gnl_theo_eq_sum_zero_e mKAs)
         || rewrite (gnl_theo_eq_sum_e_zero mKAs)
-        || rewrite (gnl_eq_sum_prod mKAs i)
-        || rewrite (gnl_eq_prod_sum mKAs i)
-        || rewrite (gnl_eq_prod_assoc mKAs i)
-        || rewrite (gnl_eq_sum_assoc mKAs);
+        || rewrite (gnl_theo_eq_sum_prod mKAs i)
+        || rewrite (gnl_theo_eq_prod_sum mKAs i)
+        || rewrite (gnl_theo_eq_prod_assoc mKAs i)
+        || rewrite (gnl_theo_eq_sum_assoc mKAs);
         repeat apply gnl_theo_inf_join;auto with proofs;
         try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
         try (now transitivity zero;eauto with proofs);
@@ -856,44 +869,44 @@ Section mKA.
        generalize dependent (mReg_to_mRegs f);
          generalize dependent (mReg_to_mRegs e);intros r1 r2 h.
        destruct (ewp e),(ewp f);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
+        repeat rewrite gnl_theo_eq_sum_assoc
+        || rewrite gnl_theo_eq_prod_assoc
         || rewrite gnl_theo_eq_prod_zero_e
         || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
+        || rewrite gnl_theo_eq_sum_prod
+        || rewrite gnl_theo_eq_prod_sum  ;
         repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
          try apply gnl_theo_inf_iter_left_ind || apply gnl_theo_inf_iter_left_ind_bis;
          rewrite <- h at 2; 
-         repeat rewrite gnl_eq_sum_assoc
-         || rewrite gnl_eq_prod_assoc
+         repeat rewrite gnl_theo_eq_sum_assoc
+         || rewrite gnl_theo_eq_prod_assoc
          || rewrite gnl_theo_eq_prod_zero_e
          || rewrite gnl_theo_eq_prod_e_zero
-         || rewrite gnl_eq_sum_prod
-         || rewrite gnl_eq_prod_sum  ;
+         || rewrite gnl_theo_eq_sum_prod
+         || rewrite gnl_theo_eq_prod_sum  ;
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
      - simpl in *.
        generalize dependent (mReg_to_mRegs f);
          generalize dependent (mReg_to_mRegs e);intros r1 r2 h.
        destruct (ewp e),(ewp f);simpl;
-        repeat rewrite gnl_eq_sum_assoc
-        || rewrite gnl_eq_prod_assoc
+        repeat rewrite gnl_theo_eq_sum_assoc
+        || rewrite gnl_theo_eq_prod_assoc
         || rewrite gnl_theo_eq_prod_zero_e
         || rewrite gnl_theo_eq_prod_e_zero
-        || rewrite gnl_eq_sum_prod
-        || rewrite gnl_eq_prod_sum  ;
+        || rewrite gnl_theo_eq_sum_prod
+        || rewrite gnl_theo_eq_prod_sum  ;
         repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l);
          try apply gnl_theo_inf_iter_right_ind || apply gnl_theo_inf_iter_right_ind_bis;
          rewrite <- h at 2; 
-         repeat rewrite gnl_eq_sum_assoc
-         || rewrite gnl_eq_prod_assoc
+         repeat rewrite gnl_theo_eq_sum_assoc
+         || rewrite gnl_theo_eq_prod_assoc
          || rewrite gnl_theo_eq_prod_zero_e
          || rewrite gnl_theo_eq_prod_e_zero
-         || rewrite gnl_eq_sum_prod
-         || rewrite gnl_eq_prod_sum  ;
+         || rewrite gnl_theo_eq_sum_prod
+         || rewrite gnl_theo_eq_prod_sum  ;
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
      - simpl in *;
@@ -902,12 +915,12 @@ Section mKA.
        apply gnl_theo_inf_iter_left_ind_bis.
        rewrite <- h at 2.
        destruct (ewp e),(ewp f);simpl;
-         repeat rewrite gnl_eq_sum_assoc
-         || rewrite gnl_eq_prod_assoc
+         repeat rewrite gnl_theo_eq_sum_assoc
+         || rewrite gnl_theo_eq_prod_assoc
          || rewrite gnl_theo_eq_prod_zero_e
          || rewrite gnl_theo_eq_prod_e_zero
-         || rewrite gnl_eq_sum_prod
-         || rewrite gnl_eq_prod_sum  ;
+         || rewrite gnl_theo_eq_sum_prod
+         || rewrite gnl_theo_eq_prod_sum  ;
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
      - simpl in *;
@@ -916,19 +929,36 @@ Section mKA.
        apply gnl_theo_inf_iter_right_ind_bis.
        rewrite <- h at 2.
        destruct (ewp e),(ewp f);simpl;
-         repeat rewrite gnl_eq_sum_assoc
-         || rewrite gnl_eq_prod_assoc
+         repeat rewrite gnl_theo_eq_sum_assoc
+         || rewrite gnl_theo_eq_prod_assoc
          || rewrite gnl_theo_eq_prod_zero_e
          || rewrite gnl_theo_eq_prod_e_zero
-         || rewrite gnl_eq_sum_prod
-         || rewrite gnl_eq_prod_sum  ;
+         || rewrite gnl_theo_eq_sum_prod
+         || rewrite gnl_theo_eq_prod_sum  ;
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
      - destruct H;simpl;auto with proofs;destruct (ewp e);eauto with proofs.
      Qed.
   
+  (** Starting from [mKAs], going around the loop of translations yields a *)
+  (** provably equivalent fuction. *)
+
+  Lemma mRegs_to_mReg_and_back e :
+    mKAs |- mReg_to_mRegs (mRegs_to_mReg e) == e.
+  Proof.
+    induction e;simpl;try rewrite IHe||rewrite IHe1,IHe2;
+     try (now split;auto with proofs).
+    repeat rewrite ewp_mRegs_to_mReg.
+    rewrite IHe1,IHe2.
+    split;auto 10 with proofs.
+  Qed.
+
+
+  (** On the other hand, since we drop [1] from the translations, going around *)
+  (** the loop starting from the other end will produce a smaller expression. *)
+  
   Lemma mReg_to_mRegs_and_back1 e :
-    gnl_theo_inf mKA (mRegs_to_mReg (mReg_to_mRegs e)) e.
+    mKA |- mRegs_to_mReg (mReg_to_mRegs e) ≤ e.
   Proof.
     induction e as [|[|] | | |];simpl;try rewrite IHe||rewrite IHe1,IHe2;
      try (now auto with proofs).
@@ -943,15 +973,19 @@ Section mKA.
       auto with proofs.
   Qed.
   
+  (** [ewp] gives us another smaller expression. *)
+
   Lemma ewp_exp_inf e :
-    gnl_theo_inf mKA (if ewp e then 1_m else zero) e.
+    mKA |- (if ewp e then 1_m else ø) ≤ e.
   Proof.
     pose proof (ewp_alt_spec e) as (he&_).
     destruct (ewp e);simpl;auto with proofs.
   Qed.
 
+  (** Together, they capture back the full meaning of [e]. *)
+
   Lemma mReg_to_mRegs_and_back2 e :
-    gnl_theo_inf mKA e (sum (if ewp e then 1_m else zero) (mRegs_to_mReg (mReg_to_mRegs e))).
+    mKA |- e ≤  (if ewp e then 1_m else ø) + (mRegs_to_mReg (mReg_to_mRegs e)).
   Proof.
     induction e as [|[|] | | |];simpl;try rewrite IHe at 1||rewrite IHe1,IHe2 at 1;
      try (now auto with proofs).
@@ -962,37 +996,37 @@ Section mKA.
     - destruct (ewp e1),(ewp e2);simpl;
       generalize dependent (mRegs_to_mReg (mReg_to_mRegs e1));intros f1 ih1;
       generalize dependent (mRegs_to_mReg (mReg_to_mRegs e2));intros f2 ih2;
-         repeat rewrite gnl_eq_sum_assoc
-         || rewrite (gnl_eq_prod_assoc mKA o)
-         || rewrite (gnl_theo_eq_prod_one_e o)
-         || rewrite (gnl_theo_eq_prod_e_one o)
+         repeat rewrite gnl_theo_eq_sum_assoc
+         || rewrite (gnl_theo_eq_prod_assoc mKA o)
+         || rewrite (mKA_prod_one_e o)
+         || rewrite (mKA_prod_e_one o)
          || rewrite (gnl_theo_eq_prod_zero_e mKA o)
          || rewrite (gnl_theo_eq_prod_e_zero mKA o)
-         || rewrite (gnl_eq_sum_prod mKA o)
-         || rewrite (gnl_eq_prod_sum mKA o);
+         || rewrite (gnl_theo_eq_sum_prod mKA o)
+         || rewrite (gnl_theo_eq_prod_sum mKA o);
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
     - destruct (ewp e);simpl;
-         repeat rewrite (gnl_eq_sum_assoc mKA)
-         || rewrite (gnl_eq_prod_assoc mKA o)
-         || rewrite (gnl_theo_eq_prod_one_e o)
-         || rewrite (gnl_theo_eq_prod_e_one o)
+         repeat rewrite (gnl_theo_eq_sum_assoc mKA)
+         || rewrite (gnl_theo_eq_prod_assoc mKA o)
+         || rewrite (mKA_prod_one_e o)
+         || rewrite (mKA_prod_e_one o)
          || rewrite (gnl_theo_eq_sum_zero_e mKA)
          || rewrite (gnl_theo_eq_sum_e_zero mKA)
          || rewrite (gnl_theo_eq_prod_zero_e mKA o)
          || rewrite (gnl_theo_eq_prod_e_zero mKA o)
-         || rewrite (gnl_eq_sum_prod mKA o)
-         || rewrite (gnl_eq_prod_sum mKA o);
+         || rewrite (gnl_theo_eq_sum_prod mKA o)
+         || rewrite (gnl_theo_eq_prod_sum mKA o);
          repeat apply gnl_theo_inf_join;auto with proofs;
          try (now repeat reflexivity||apply gnl_theo_inf_join_r||rewrite <- gnl_theo_inf_join_l).
       clear IHe.
       generalize dependent (mRegs_to_mReg (mReg_to_mRegs e)).
       clear e;intros e.
       apply gnl_theo_inf_iter_left_ind_bis.
-      repeat rewrite gnl_eq_sum_prod
-             || rewrite gnl_eq_prod_sum
-             || rewrite gnl_theo_eq_prod_one_e
-             || rewrite gnl_theo_eq_prod_e_one.
+      repeat rewrite gnl_theo_eq_sum_prod
+             || rewrite gnl_theo_eq_prod_sum
+             || rewrite mKA_prod_one_e
+             || rewrite mKA_prod_e_one.
       repeat apply gnl_theo_inf_join;auto with proofs.
       + rewrite <- gnl_theo_inf_join_r.
         rewrite <- gnl_theo_inf_iter_unfold_left;auto with proofs.
@@ -1002,8 +1036,10 @@ Section mKA.
         rewrite <- gnl_theo_inf_iter_unfold_left at 2;auto with proofs.
   Qed.
 
+  (** Thus we can prove the following identity. *)
+
   Theorem mReg_to_mRegs_and_back e :
-    gnl_theo_eq mKA e (sum (if ewp e then 1_m else zero) (mRegs_to_mReg (mReg_to_mRegs e))).
+    mKA |- e == (if ewp e then 1_m else ø) + (mRegs_to_mReg (mReg_to_mRegs e)).
   Proof.
     split.
     - apply mReg_to_mRegs_and_back2.
@@ -1012,8 +1048,11 @@ Section mKA.
       + apply mReg_to_mRegs_and_back1.
   Qed.
 
+  (** Finally we show in the next two lemmas that the semantics of [mKA] and [mKAs] *)
+  (** are inter-translatable. *)
+  
   Lemma mRegs_to_mReg_sem s e :
-    gnl_theo_sat mkas s e <-> in_mlang (mSPs_to_mSP s) (mRegs_to_mReg e).
+    s |=(mkas)= e <-> mSPs_to_mSP s |=(mka)= mRegs_to_mReg e.
   Proof.
     revert s;induction e;simpl;tauto||intro s.
     - replace (mSPs_to_mSP s) with (mSPs_opt_to_mSP (Some s)) by reflexivity.
@@ -1063,13 +1102,13 @@ Section mKA.
           apply IHe,h3; now left.
       + rewrite etL in h1;inversion h1;subst;clear h1.
         destruct (IHL tL tL) as (t'&L'&ih1&ih2&ih3);auto with proofs.
-        exists (t_prod o (mSPs_opt_to_mSP (Some a)) t'),(mSPs_to_mSP a::L').
+        exists (mSPs_opt_to_mSP (Some a) -[o]- t'),(mSPs_to_mSP a::L').
         repeat split;auto with proofs.
         * simpl;rewrite ih1;reflexivity.
         * rewrite <- ih2.
           replace (mSPs_to_mSP s) with (mSPs_opt_to_mSP (Some s)) by reflexivity. 
-          replace (t_prod o (mSPs_opt_to_mSP (Some a)) (mSPs_to_mSP tL))
-            with (mSPs_opt_to_mSP (Some (t_prod o a tL))) by reflexivity. 
+          replace (mSPs_opt_to_mSP (Some a) -[o]- mSPs_to_mSP tL)
+            with (mSPs_opt_to_mSP (Some (a -[o]- tL))) by reflexivity. 
           apply mSPs_opt_to_mSP_proper,h2.
         * intros ? [<-|h];[apply IHe,h3;left|apply ih3];auto.
       + exists s,[s];repeat split;auto with proofs.
@@ -1085,8 +1124,8 @@ Section mKA.
           -- intros g' hg'.
              assert (h4: gnl_term_theo_eq mka a (mSPs_to_mSP g'))
                by (rewrite <- mSP_to_mSPs_and_back;rewrite hg';simpl;reflexivity).
-             exists (t_prod o g' t'),(g'::L');simpl;rewrite ih1;repeat split;auto with proofs.
-             ++ cut (or_none (gnl_term_theo_eq mkas) (Some s) (Some (t_prod o g' t')));
+             exists (g' -[o]- t'),(g'::L');simpl;rewrite ih1;repeat split;auto with proofs.
+             ++ cut (or_none (gnl_term_theo_eq mkas) (Some s) (Some (g' -[o]- t')));
                   [intros h;apply h|].
                 rewrite <- mSPs_opt_to_mSP_and_back.
                 rewrite <- mSPs_opt_to_mSP_and_back at 1.
@@ -1128,9 +1167,9 @@ Section mKA.
   Qed.
 
   Lemma mReg_to_mRegs_sem s e :
-    gnl_theo_sat mka s e <->
+    s |=(mka)= e <->
       ((mSP_to_mSPs_opt s) = None /\ ewp e = true)
-      \/ exists d, (mSP_to_mSPs_opt s) = Some d /\ gnl_theo_sat mkas d (mReg_to_mRegs e).
+      \/ exists d, (mSP_to_mSPs_opt s) = Some d /\ d |=(mkas)=(mReg_to_mRegs e).
   Proof.
     split.
     - case_eq (mSP_to_mSPs_opt s).

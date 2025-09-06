@@ -1,14 +1,22 @@
+(** * gnl_alg.gnl_depth: Depth of terms and expressions *)
+
 Require Import prelim depth gnl gnl_decomp mka.
 
 Section gnl_depth.
   
   Context {A O : Set} {decA: decidable_set A} {decO: decidable_set O} .
 
+  (** * Depth of terms *)
+  (** The depth of a term is defined by that following morphism. *)
+
   Fixpoint gnl_depth (s : GTerm A O) : @depth O :=
     match s with
     | t_var _ => d_var
     | s -[o]- t => d_prod o (gnl_depth s) (gnl_depth t)
     end.
+
+  (** If a theory is depth-compatible, then the corresponding equivalence relation *)
+  (** is depth compatible. *)
 
   Global Instance gnl_depth_proper rT :
     Proper (rT ==> eq) gnl_depth ->
@@ -27,12 +35,22 @@ Section gnl_depth.
       + destruct n1;lia.
   Qed.
 
+  (** This applies in particular to [Ø]. *)
+  
+  Global Instance Empty_gnl_depth : Proper (Ø ==> eq) gnl_depth.
+  Proof. intros ? ? []. Qed.
+
+  (** We may also define the depth of a decomposition.*)
+
   Definition decomp_depth : @gnl_decomposition A O -> @depth O :=
     fun d =>
       match d with
       | inl _ => d_var
       | inr (o,l) => fold_right (d_prod o) d_one (map gnl_depth l)
       end.
+
+  (** Every term has depth strictly larger than [d_one]. That is because we do *)
+  (** not consider the constant [1] in general terms and expressions. *)
 
   Lemma gnl_depth_not_one t :
     depth_lt d_one (gnl_depth t).
@@ -41,6 +59,8 @@ Section gnl_depth.
     destruct (gnl_depth t1) as [| |o1],(gnl_depth t2) as [| |o2];simpl in *;
       try destruct (o1 =?= o);try destruct (o2 =?= o);auto.
   Qed.
+
+  (** Valid decompositions also have depth larger than [d_one]. *)
 
   Lemma gnl_valid_decomp_not_one d : gnl_valid d = true -> depth_lt d_one (decomp_depth d).
   Proof.
@@ -53,6 +73,8 @@ Section gnl_depth.
       try destruct (o1 =?= o);try destruct (o2 =?= o);auto.
   Qed.
   
+  (** Recomposing decompositions deos not modify the depth. *)
+
   Lemma decomp_depth_recompose d t :
     gnl_recompose d = Some t -> gnl_depth t = decomp_depth d.
   Proof.
@@ -65,8 +87,14 @@ Section gnl_depth.
       + destruct (gnl_depth s);simpl;auto.
       + rewrite (IHl tl etl);reflexivity.
   Qed.
+
+  (** The product of depth being commutative, the depth of the following pair of terms *)
+  (** is identical. *)
+
   Lemma gnl_depth_prod_comm o t t' : gnl_depth (t -[o]- t') = gnl_depth (t' -[o]- t).
   Proof. simpl;apply d_prod_comm. Qed.
+
+  (** The following is instrumental in the next proof: *)
 
   Lemma gnl_term_to_list_depth_lt o s t t' :
     In s (gnl_term_to_list o t) -> depth_lt (gnl_depth s) (gnl_depth (t -[o]- t')).
@@ -91,6 +119,8 @@ Section gnl_depth.
       + simpl;apply d_prod_o_d_prod_o'_lt;auto using gnl_depth_not_one.
   Qed.
   
+  (** Subterms of [t], i.e. terms featuring in [t]'s decomposition, have striclty *)
+  (** smaller depth. *)
 
   Lemma sub_pomset_depth_lt : Proper (sub_term ==> depth_lt) gnl_depth.
   Proof.
@@ -102,6 +132,10 @@ Section gnl_depth.
       apply gnl_term_to_list_depth_lt,h.
   Qed.
 
+  (** * Depth of expressions*)
+
+  (** The depth of an expression is a list of depth elements defined as follows:*)
+
   Fixpoint gnl_exp_depth (e : GExp A O) : list depth :=
     match e with
     | ø => []
@@ -111,8 +145,7 @@ Section gnl_depth.
     | e ^{o} => DIter o (gnl_exp_depth e)
     end.
 
-  Global Instance Empty_gnl_depth : Proper (Ø ==> eq) gnl_depth.
-  Proof. intros ? ? []. Qed.
+  (** This definition coincides with the set of depths of terms satisfying [e]. *)
     
   Lemma gnl_exp_depth_spec (e : GExp A O) d :
     In d (gnl_exp_depth e) <-> exists s, d = gnl_depth s /\ s |=(Ø)= e.
@@ -177,26 +210,5 @@ Section gnl_depth.
   (*   unfold depth_list_inf. *)
    
   (* Qed. *)
-  
-  (* Lemma d_one_SP_depth {A} (s : @SP A) : SP_eq s one <-> SP_depth s = d_one. *)
-  (* Proof. *)
-  (*   split;[intro E;apply SP_depth_proper in E as ->;reflexivity|]. *)
-  (*   rewrite <- is_one_eq_iff. *)
-  (*   induction s;simpl;try discriminate||reflexivity. *)
-  (*   - rewrite Bool.andb_true_iff. *)
-  (*     case_eq (SP_depth s1);simpl. *)
-  (*     + intuition. *)
-  (*     + destruct (SP_depth s2);discriminate. *)
-  (*     + destruct (SP_depth s2);discriminate. *)
-  (*     + destruct (SP_depth s2);discriminate. *)
-  (*   - rewrite Bool.andb_true_iff. *)
-  (*     case_eq (SP_depth s1);simpl. *)
-  (*     + intuition. *)
-  (*     + destruct (SP_depth s2);discriminate. *)
-  (*     + destruct (SP_depth s2);discriminate. *)
-  (*     + destruct (SP_depth s2);discriminate. *)
-  (* Qed. *)
-
-
 
 End gnl_depth.
