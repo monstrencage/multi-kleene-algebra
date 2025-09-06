@@ -1,2 +1,24 @@
 -R src gnl_alg
-src
+
+# preliminaries
+
+src/prelim.v
+src/ka.v
+src/cka.v
+
+# main development
+
+src/gnl.v
+src/theories.v
+src/gnl_decomp.v
+src/gnl_recompose.v
+
+# depth
+
+src/depth.v
+src/gnl_depth.v
+
+# mka
+
+src/mka.v
+src/mka_depth.v
